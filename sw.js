@@ -1,7 +1,7 @@
 // Service worker : l'appli s'ouvre même sans réseau.
 // Fichiers de l'appli : réseau d'abord (pour recevoir les mises à jour), sinon cache.
-const CACHE = 'nutriscan-v2';
-const FILES = ['./', './index.html', './styles.css', './app.js', './foods.js', './manifest.webmanifest', './icon.svg', './icon-180.png', './icon-192.png', './icon-512.png'];
+const CACHE = 'nutriscan-v3';
+const FILES = ['./', './index.html', './styles.css', './app.js', './foods.js', './additives.js', './halal.js', './manifest.webmanifest', './icon.svg', './icon-180.png', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(FILES)).catch(() => {}));
