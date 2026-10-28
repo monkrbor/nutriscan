@@ -442,3 +442,6 @@ mark.hl-orange{background:var(--warn-soft);color:var(--warn-text);font-weight:80
 .prose{display:flex;flex-direction:column;gap:10px;font-size:15px;line-height:1.55;max-width:65ch}
 code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12.5px;background:var(--surface-2);border-radius:8px;padding:8px 10px}
 .stack{display:flex;flex-direction:column;gap:12px}
+
+/* ---------- Hors ligne ---------- */
+.j-top .net{margin-left:auto;margin-right:8px;display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:800;color:var(--warn-text);background:var(--warn-soft);border-radius:99px;padding:7px 11px;align-self:center}
