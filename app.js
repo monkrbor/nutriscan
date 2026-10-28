@@ -59,7 +59,8 @@
   const NUTRI_COLORS = { a: '#038141', b: '#85BB2F', c: '#E5B700', d: '#EE8100', e: '#E63E11' };
   const OFF = 'https://world.openfoodfacts.org';
   const OFF_SEARCH = 'https://fr.openfoodfacts.org';
-  const FIELDS = 'code,product_name,product_name_fr,generic_name_fr,brands,quantity,serving_size,serving_quantity,nutriments,nutriscore_grade,image_front_small_url,image_small_url';
+  const FIELDS = 'code,product_name,product_name_fr,generic_name_fr,brands,quantity,serving_size,serving_quantity,nutriments,nutriscore_grade,image_front_small_url,image_small_url,ingredients_text_fr,ingredients_text,ingredients_tags,additives_tags,labels_tags,ingredients_analysis_tags,traces_tags,allergens_tags';
+  const H = window.NS_HALAL;
 
   /* ================= Données ================= */
   const KEY = 'nutriscan.v2';
@@ -79,7 +80,8 @@
       water: s.water && typeof s.water === 'object' ? s.water : {},
       exercises: Array.isArray(s.exercises) ? s.exercises.filter(x => x && x.date) : [],
       weights: Array.isArray(s.weights) ? s.weights.filter(w => w && w.date && w.kg > 0) : [],
-      theme: ['auto', 'light', 'dark'].includes(s.theme) ? s.theme : 'auto'
+      theme: ['auto', 'light', 'dark'].includes(s.theme) ? s.theme : 'auto',
+      halal: Object.assign({}, H.DEF, s.halal && typeof s.halal === 'object' ? s.halal : {})
     };
     for (const k of Object.keys(o.products)) {
       const p = o.products[k];
@@ -124,6 +126,90 @@
   const GEN_MAP = new Map(GEN.map(p => [p.key, p]));
   const getP = k => (k && (S.products[k] || GEN_MAP.get(k) || TMP.get(k))) || null;
 
+  /* ---------- Halal / végan / additifs ---------- */
+  let halalVersion = 0;
+  const HCACHE = new WeakMap();
+  function halalOf(p) {
+    const sig = halalVersion + '|' + (p.ing || '').length + '|' + (p.additives || []).length + '|' + (p.labels || []).length;
+    const c = HCACHE.get(p);
+    if (c && c.sig === sig) return c.res;
+    const res = H.analyze(p, S.halal);
+    HCACHE.set(p, { sig, res });
+    return res;
+  }
+  const RED_SHORT = { porc: 'Porc', alcool: 'Alcool', 'alcool-trace-vinaigre': 'Alcool', 'alcool-trace-vanille': 'Alcool', gelatine: 'Gélatine', sang: 'Sang' };
+  const VEG_LABEL = { vegan: 'Végan', vegetarian: 'Végétarien', 'maybe-veg': 'Végétarien ?', 'maybe-vegan': 'Végan ?', nonveg: 'Non végétarien' };
+  function halalPill(p) {
+    if (!p || !S.halal.on || p.source === 'quick') return '';
+    const h = halalOf(p);
+    if (h.status === 'red') { const r = h.reasons.find(x => x.level === 'red'); return '<span class="hp h-red">' + esc((r && RED_SHORT[r.key]) || 'Sensible') + '</span>'; }
+    if (h.status === 'orange') return '<span class="hp h-orange">À vérifier</span>';
+    if (h.status === 'cert') return '<span class="hp h-cert">Halal</span>';
+    return '';
+  }
+  function halalCardHTML(p) {
+    const h = halalOf(p);
+    const vegChip = VEG_LABEL[h.veg] ? '<span class="hchip' + (h.veg === 'vegan' || h.veg === 'vegetarian' ? ' veg' : '') + '">' + VEG_LABEL[h.veg] + '</span>' : '';
+    if (!S.halal.on) return vegChip ? '<div class="h-chips">' + vegChip + '</div>' : '';
+    const reds = h.reasons.filter(r => r.level === 'red'), oranges = h.reasons.filter(r => r.level === 'orange');
+    let icon = 'i-check', title = '', sub = '';
+    if (h.status === 'red') {
+      icon = 'i-alert';
+      title = 'Contient : ' + [...new Set(reds.map(r => RED_SHORT[r.key] || r.title))].join(', ').toLowerCase();
+      sub = oranges.length ? 'et ' + oranges.length + ' point' + (oranges.length > 1 ? 's' : '') + ' à vérifier' : 'Voir le détail ci-dessous';
+    } else if (h.status === 'orange') {
+      icon = 'i-alert'; title = 'À vérifier'; sub = oranges.length + ' point' + (oranges.length > 1 ? 's' : '') + ' à vérifier';
+    } else if (h.status === 'cert') {
+      title = 'Label halal'; sub = 'Le produit indique un label ou une mention halal.';
+    } else if (h.status === 'ok') {
+      title = 'Rien de sensible détecté'; sub = 'Ni porc, ni alcool, ni gélatine, ni viande dans les ingrédients.';
+    } else {
+      icon = 'i-help'; title = 'Ingrédients inconnus';
+      sub = p.source === 'custom' ? 'Aliment créé par toi : pas de liste d’ingrédients à vérifier.' : 'Open Food Facts n’a pas encore la liste d’ingrédients : regarde le paquet.';
+    }
+    return '<section class="halal h-' + h.status + '" aria-label="Vérification halal">' +
+      '<div class="h-top"><span class="h-ic">' + ic(icon) + '</span><div class="min0"><b>' + esc(title) + '</b><small>' + esc(sub) + '</small></div></div>' +
+      (h.reasons.length ? '<ul class="h-list">' + h.reasons.map(r => '<li class="h-' + r.level + '"><i></i><b>' + esc(r.title) + '</b><span>' + esc(r.why) + '</span></li>').join('') + '</ul>' : '') +
+      ((vegChip || (h.certified && h.status !== 'cert')) ? '<div class="h-chips">' + vegChip + (h.certified && h.status !== 'cert' ? '<span class="hchip veg">Label halal</span>' : '') + '</div>' : '') +
+      (h.status === 'unknown' ? '' : '<p class="h-note">Vérification automatique d’après la liste d’ingrédients. Elle peut être incomplète : en cas de doute, fie-toi à l’emballage et au label.</p>') +
+      '</section>';
+  }
+  const HAL_TAG = { u: ['orange', 'Origine animale possible'], i: ['orange', 'Insectes'], b: ['orange', 'Os d’animaux'], g: ['red', 'Souvent du porc'], a: ['red', 'Alcool'] };
+  const HEALTH_TAG = [['ok', 'Pas de risque connu'], ['orange', 'À limiter'], ['red', 'À éviter']];
+  function addHTML(a) {
+    const i = a.info, code = 'E' + a.code.slice(1);
+    if (!i) return '<div class="add"><div class="add-top"><b>' + esc(code) + '</b><span>Additif non répertorié dans l’appli</span></div></div>';
+    const ht = S.halal.on ? HAL_TAG[i.halal] : null, he = HEALTH_TAG[i.level] || HEALTH_TAG[0];
+    return '<div class="add"><div class="add-top"><b>' + esc(code) + '</b><span>' + esc(i.name) + '</span></div>' +
+      '<div class="tags"><span class="tag">' + esc(i.role) + '</span><span class="tag">' + esc(i.origin) + '</span>' +
+      (ht ? '<span class="tag t-' + ht[0] + '">' + ht[1] + '</span>' : '') + '<span class="tag t-' + he[0] + '">' + he[1] + '</span></div>' +
+      (i.health ? '<p>' + esc(i.health) + '</p>' : '') + '</div>';
+  }
+  function extraHTML(p) {
+    if (p.source === 'gen' || p.source === 'custom' || p.source === 'quick') return '';
+    const h = halalOf(p), adds = h.additives;
+    let html = '';
+    if (adds.length) html += '<section class="xcard"><div class="card-title"><h2>Additifs<span class="count">' + adds.length + '</span></h2></div><div class="adds">' + adds.map(addHTML).join('') + '</div></section>';
+    else if (p.ing) html += '<p class="hint center">Aucun additif (E…) dans la liste d’ingrédients.</p>';
+    const al = H.allergenNames(p.allergens), tr = H.allergenNames(p.traces);
+    if (al.length || tr.length) html += '<div class="xcard allerg-card">' +
+      (al.length ? '<p class="allerg"><b>Allergènes :</b> ' + esc(al.join(', ')) + '</p>' : '') +
+      (tr.length ? '<p class="allerg"><b>Traces possibles :</b> ' + esc(tr.join(', ')) + '</p>' : '') + '</div>';
+    if (p.ing) html += '<details class="xcard ing"' + (h.status === 'red' || h.status === 'orange' ? ' open' : '') + '><summary>Ingrédients</summary><p class="ing-text">' + H.highlight(p.ing, h.hits, esc) + '</p></details>';
+    return html;
+  }
+  const needsDetails = p => !!(p && p.source === 'off' && p.code && p.ing === undefined);
+  async function fetchOff(code) {
+    const res = await fetch(OFF + '/api/v2/product/' + code + '.json?fields=' + FIELDS);
+    const data = await res.json().catch(() => null);
+    return data && data.status === 1 && data.product ? normalizeOff(data.product, code) : null;
+  }
+  function vibrateFor(p) {
+    if (!navigator.vibrate || !S.halal.on) return;
+    const st = halalOf(p).status;
+    try { if (st === 'red') navigator.vibrate([180, 90, 180, 90, 180]); else if (st === 'orange') navigator.vibrate([120, 80, 120]); } catch (e) { /* rien */ }
+  }
+
   function unitOf(qty) { return /\d\s*(ml|cl|dl|l)\b/i.test(String(qty || '')) ? 'ml' : 'g'; }
   function normalizeOff(p, codeHint) {
     if (!p) return null;
@@ -144,7 +230,14 @@
       per100: { kcal: num(kcal), p: num(n.proteins_100g), c: num(n.carbohydrates_100g), f: num(n.fat_100g),
         sugar: opt(n.sugars_100g), sfat: opt(n['saturated-fat_100g']), fiber: opt(n.fiber_100g), salt: opt(n.salt_100g) },
       hasNutri: kcal != null && kcal !== '',
-      source: 'off'
+      source: 'off',
+      ing: String(p.ingredients_text_fr || p.ingredients_text || '').replace(/_/g, '').trim(),
+      ingTags: Array.isArray(p.ingredients_tags) ? p.ingredients_tags.slice(0, 80) : [],
+      additives: Array.isArray(p.additives_tags) ? p.additives_tags : [],
+      labels: Array.isArray(p.labels_tags) ? p.labels_tags : [],
+      analysis: Array.isArray(p.ingredients_analysis_tags) ? p.ingredients_analysis_tags : [],
+      traces: Array.isArray(p.traces_tags) ? p.traces_tags : [],
+      allergens: Array.isArray(p.allergens_tags) ? p.allergens_tags : []
     };
   }
   const portionsOf = p => (p && Array.isArray(p.portions) ? p.portions.filter(x => x && x.g > 0) : []);
@@ -246,7 +339,7 @@
   function entryRow(e) {
     const p = getP(e.key);
     const sub = e.key === 'quick' ? 'Ajout rapide' : (e.brand ? e.brand + ' · ' : '') + amountLabel(p || { unit: e.unit }, e.unitIdx || 0, e.amount, e.grams);
-    return '<li><button class="entry" data-act="editEntry" data-id="' + esc(e.id) + '"><span class="en">' + esc(e.name) + '</span><span class="es">' + esc(sub) +
+    return '<li><button class="entry" data-act="editEntry" data-id="' + esc(e.id) + '"><span class="en">' + esc(e.name) + halalPill(p) + '</span><span class="es">' + esc(sub) +
       '</span><span class="ek num">' + fk(e.kcal) + '<small>kcal</small></span></button></li>';
   }
   function renderMeals() {
@@ -440,7 +533,7 @@
     const amt = d.unitIdx > 0 ? portionText(portionsOf(p)[d.unitIdx - 1].label, d.amount) : f1(g) + ' ' + (p.unit || 'g');
     const done = AF && AF.flash === p.key;
     return '<div class="row"><button class="row-main" data-act="afOpen" data-k="' + esc(p.key) + '">' + thumbHTML(p) +
-      '<span class="rt"><b>' + esc(p.name) + '</b><small>' + esc((p.brand ? p.brand + ' · ' : '') + amt) + ' · ' + fk(k) + ' kcal</small></span></button>' +
+      '<span class="rt"><b>' + esc(p.name) + halalPill(p) + '</b><small>' + esc((p.brand ? p.brand + ' · ' : '') + amt) + ' · ' + fk(k) + ' kcal</small></span></button>' +
       '<button class="qadd' + (done ? ' done' : '') + '" data-act="afAdd1" data-k="' + esc(p.key) + '" aria-label="Ajouter ' + esc(p.name) + '">' + ic(done ? 'i-check' : 'i-plus', 'sm') + '</button></div>';
   }
   const listHTML = list => '<div class="list">' + list.map(rowHTML).join('') + '</div>';
@@ -581,6 +674,19 @@
     box.innerHTML = productHTML(ps);
     layer.el.scrollTop = 0;
     wireProduct(box, ps);
+    if (opts.fromScan && !needsDetails(p)) vibrateFor(p);
+    if (needsDetails(p)) {
+      fetchOff(p.code).then(np => {
+        if (!np) { p.ing = p.ing || ''; return; }
+        ['ing', 'ingTags', 'additives', 'labels', 'analysis', 'traces', 'allergens'].forEach(k => { p[k] = np[k]; });
+        if (!p.image) p.image = np.image;
+        if (!p.nutri) p.nutri = np.nutri;
+        if (S.products[p.key]) { S.products[p.key] = p; save(); }
+        if (box.isConnected) { $('#psHalal', box).innerHTML = halalCardHTML(p); $('#psExtra', box).innerHTML = extraHTML(p); if (opts.fromScan) vibrateFor(p); }
+        if (AF) renderAF();
+        renderMeals();
+      }).catch(() => {});
+    }
   }
   function productHTML(ps) {
     const p = ps.p, n = p.per100, u = p.unit || 'g', portions = portionsOf(p);
@@ -594,6 +700,7 @@
       '<button class="iconbtn star' + (isFav ? ' on' : '') + '" data-pa="fav" aria-label="' + (isFav ? 'Retirer des favoris' : 'Ajouter aux favoris') + '" aria-pressed="' + isFav + '">' + ic('i-star') + '</button></div>' +
       '<div class="ps-head">' + img + '<div class="min0"><h3 class="ps-name">' + esc(p.name) + '</h3><p class="ps-brand">' + esc([p.brand, p.qty].filter(Boolean).join(' · ') || (p.source === 'gen' ? 'Valeurs moyennes' : '')) + '</p>' +
       (p.nutri ? '<span class="ns">Nutri-Score <b style="background:' + NUTRI_COLORS[p.nutri] + '">' + p.nutri + '</b></span>' : '') + '</div></div>' +
+      '<div id="psHalal">' + halalCardHTML(p) + '</div>' +
       (p.hasNutri === false ? '<div class="msg err">Ce produit n’a pas encore ses valeurs nutritionnelles dans Open Food Facts. Tu peux le recréer avec « Créer un aliment ».</div>' : '') +
       '<div class="amt-row"><span class="flabel">Quantité</span><div class="amt"><button data-pa="minus" aria-label="Moins">' + ic('i-minus') + '</button>' +
       '<input id="psAmt" inputmode="decimal" aria-label="Quantité" autocomplete="off"><button data-pa="plus" aria-label="Plus">' + ic('i-plus') + '</button></div>' +
@@ -602,6 +709,7 @@
       '<div class="min0">' + MACROS.map(m => '<div class="pm"><i style="background:' + m.color + '"></i><span>' + m.label + '</span><b class="num" id="ps_' + m.k + '">0 g</b><em id="pse_' + m.k + '"></em></div>').join('') + '</div></div>' +
       '<p class="goalnote" id="psGoal"></p>' +
       '<div><span class="flabel">Repas</span><div class="seg" id="psMeal" style="margin-top:6px">' + MEALS.map(m => '<button data-meal="' + m.id + '">' + m.short + '</button>').join('') + '</div></div>' +
+      '<div id="psExtra" style="display:flex;flex-direction:column;gap:14px">' + extraHTML(p) + '</div>' +
       '<div class="nt"><div class="tr th"><span>Valeurs</span><span>100 ' + u + '</span><span id="psQh">Quantité</span></div>' +
       row('Énergie (kcal)', 'kcal') + row('Protéines', 'p') + row('Glucides', 'c') + row('dont sucres', 'sugar', true) + row('Lipides', 'f') + row('dont saturés', 'sfat', true) + row('Fibres', 'fiber') + row('Sel', 'salt') + '</div>' +
       (p.code ? '<p class="hint center num">Code-barres ' + esc(p.code) + '</p>' : '') +
@@ -696,7 +804,7 @@
     const code = String(raw || '').replace(/\D/g, '');
     if (code.length < 6) { toast('Ce code-barres ne semble pas valide'); return; }
     const local = S.products[code] || Object.values(S.products).find(p => p.code === code) || TMP.get(code);
-    if (local) { openProduct(local, { swap: opts.swap }); return; }
+    if (local) { openProduct(local, { swap: opts.swap, fromScan: opts.fromScan }); return; }
     const el = mountSheet('<div class="grab"></div><div class="sheet-head"><h3>Recherche du produit</h3><button class="iconbtn" data-act="close" aria-label="Fermer">' + ic('i-x') + '</button></div>' +
       '<div class="loading"><div class="spin"></div>Code <b class="num">' + esc(code) + '</b> : je cherche dans Open Food Facts…</div>');
     const layer = openLayer({ el, kind: 'product' }, opts.swap);
@@ -810,7 +918,7 @@
     SC.handled = true;
     $('#scFrame').classList.add('ok');
     if (navigator.vibrate) { try { navigator.vibrate(70); } catch (e) { /* rien */ } }
-    stopScan().then(() => { if (scannerOpen()) lookupCode(code, { swap: true }); });
+    stopScan().then(() => { if (scannerOpen()) lookupCode(code, { swap: true, fromScan: true }); });
   }
   function showManual() { $('#scManualForm').hidden = false; }
 
@@ -1125,6 +1233,7 @@
         '<div class="kv"><span>Poids actuel</span><b>' + fkg(latestWeight()) + ' kg</b></div>' +
         (P.goal !== 'maintain' && P.goalWeight ? '<div class="kv"><span>Poids visé</span><b>' + fkg(P.goalWeight) + ' kg</b></div>' : '') +
         '<div class="kv"><span>Activité</span><b>' + esc(lvl ? lvl.label : '') + '</b></div></section>' : '') +
+      halalSettingsHTML() +
       '<section class="card"><div class="card-title"><h2>Apparence</h2></div><div class="seg">' +
       [['auto', 'Automatique'], ['light', 'Clair'], ['dark', 'Sombre']].map(t => '<button data-act="theme" data-t="' + t[0] + '"' + (S.theme === t[0] ? ' class="on"' : '') + '>' + t[1] + '</button>').join('') + '</div></section>' +
       '<section class="card"><div class="menu">' +
@@ -1135,10 +1244,22 @@
       '<button class="danger" data-act="wipe" data-confirm="Appuie encore : tout sera effacé">' + ic('i-trash') + '<span class="grow">Effacer toutes mes données</span></button></div></section>' +
       '<p class="credit">NutriScan 2.0 · Tes données restent sur ce téléphone.<br>Produits : <a href="https://world.openfoodfacts.org" target="_blank" rel="noopener">Open Food Facts</a> (licence ODbL)</p>';
   }
+  function halalSettingsHTML() {
+    const hs = S.halal;
+    const seg = (k, opts) => '<div class="seg">' + opts.map(o => '<button data-act="halalSet" data-k="' + k + '" data-v="' + o[0] + '"' + (String(hs[k]) === o[0] ? ' class="on"' : '') + '>' + o[1] + '</button>').join('') + '</div>';
+    const lv = [['red', 'Rouge'], ['orange', 'Orange'], ['off', 'Ignorer']];
+    return '<section class="card"><div class="card-title"><h2>Halal et ingrédients</h2></div>' +
+      '<div class="setrow"><span>Vérification halal au scan</span>' + seg('on', [['true', 'Activée'], ['false', 'Désactivée']]) + '</div>' +
+      (hs.on ? '<div class="setrow"><span>Viande sans label halal</span>' + seg('meat', lv) + '</div>' +
+        '<div class="setrow"><span>Alcool en trace (vinaigre de vin, extrait de vanille…)</span>' + seg('alcohol', lv) + '</div>' +
+        '<div class="setrow"><span>Origine animale possible (E471, présure, glycérine…)</span>' + seg('unc', [['orange', 'Orange'], ['off', 'Ignorer']]) + '</div>' +
+        '<p class="hint">Porc, gélatine, sang et boissons alcoolisées sont toujours signalés en rouge. Le statut végan / végétarien s’affiche sur chaque produit.</p>' : '') +
+      '</section>';
+  }
   function openFoodList(kind) {
     const list = kind === 'fav' ? S.favorites.map(getP).filter(Boolean) : Object.values(S.products).filter(p => p.source === 'custom').sort((a, b) => a.name.localeCompare(b.name, 'fr'));
     const el = mountSheet(head(kind === 'fav' ? 'Mes favoris' : 'Mes aliments') +
-      (list.length ? '<div class="list">' + list.map(p => '<div class="row"><button class="row-main" data-fl="' + esc(p.key) + '">' + thumbHTML(p) + '<span class="rt"><b>' + esc(p.name) + '</b><small>' + esc(p.brand ? p.brand + ' · ' : '') + fk(p.per100.kcal) + ' kcal / 100 ' + (p.unit || 'g') + '</small></span></button>' + ic('i-right', 'sm') + '</div>').join('') + '</div>'
+      (list.length ? '<div class="list">' + list.map(p => '<div class="row"><button class="row-main" data-fl="' + esc(p.key) + '">' + thumbHTML(p) + '<span class="rt"><b>' + esc(p.name) + halalPill(p) + '</b><small>' + esc(p.brand ? p.brand + ' · ' : '') + fk(p.per100.kcal) + ' kcal / 100 ' + (p.unit || 'g') + '</small></span></button>' + ic('i-right', 'sm') + '</div>').join('') + '</div>'
         : emptyHTML(kind === 'fav' ? 'i-star' : 'i-edit', kind === 'fav' ? 'Aucun favori' : 'Aucun aliment perso', kind === 'fav' ? 'Touche l’étoile sur la fiche d’un aliment.' : 'Crée un aliment depuis « Ajouter un aliment ».')) +
       (kind === 'fav' ? '' : '<button class="btn primary" data-fl="new">Créer un aliment</button>'), { tall: true });
     openLayer({ el });
@@ -1357,12 +1478,17 @@
     editGoals: () => openGoals(),
     editProfile: () => openOnboarding(!!S.profile),
     theme: b => { S.theme = b.dataset.t; save(); applyTheme(); renderProfile(); },
+    halalSet: b => {
+      const k = b.dataset.k, v = b.dataset.v;
+      S.halal[k] = k === 'on' ? v === 'true' : v;
+      halalVersion++; save(); renderAll();
+    },
     myFoods: () => openFoodList('mine'),
     favList: () => openFoodList('fav'),
     exportData: () => exportData(),
     importData: () => $('#importFile').click(),
     wipe: () => {
-      const theme = S.theme; S = fixState({ theme }); save(); TMP.clear(); setDay(today()); switchTab('journal'); toast('Toutes les données ont été effacées'); openOnboarding(false);
+      const theme = S.theme, halal = S.halal; S = fixState({ theme, halal }); save(); TMP.clear(); setDay(today()); switchTab('journal'); toast('Toutes les données ont été effacées'); openOnboarding(false);
     },
     afMealPick: () => {
       if (!AF) return;
@@ -1405,7 +1531,7 @@
     const code = $('#scCode').value.replace(/\D/g, '');
     if (code.length < 6) { toast('Tape les chiffres sous le code-barres'); return; }
     $('#scCode').blur();
-    stopScan().then(() => lookupCode(code, { swap: true }));
+    stopScan().then(() => lookupCode(code, { swap: true, fromScan: true }));
   });
 
   // Changement de jour pendant que l'appli reste ouverte + coupure caméra en arrière-plan

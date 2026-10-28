@@ -13,6 +13,9 @@ Appli en ligne : **https://monkrbor.github.io/nutriscan/**
 - **Récents, favoris, mes aliments**, ajout en un clic avec le bouton +
 - **Ajout rapide** (juste les calories), **création d'aliments** (un code-barres inconnu est reconnu ensuite)
 - **Reprendre le repas d'hier**, vider un repas, modifier ou supprimer chaque aliment
+- **Vérification halal au scan** : porc, gélatine, alcool (même en trace : vinaigre de vin, extrait de vanille…), sang en rouge ; viande sans label et origine animale possible (E471, présure…) en orange. L'appli dit ce que contient le produit, sans verdict religieux. Réglable dans Profil
+- **Végan / végétarien** sur chaque produit
+- **Détail de chaque additif E** (≈ 250 additifs) : nom, rôle, origine, point halal, info santé ; ingrédients surlignés ; allergènes
 - **Eau** (verres de 250 ml), **activités** (calories brûlées estimées, ajoutées au budget), **poids**
 - **Progrès** : calories sur 7 ou 30 jours, macros moyennes, courbe de poids, IMC, régularité
 - **Profil** : objectifs modifiables, thème clair / sombre / automatique, sauvegarde et restauration des données
@@ -33,6 +36,8 @@ Les données restent sur le téléphone (stockage du navigateur). Pense à faire
 | `styles.css` | Design (thème clair et sombre) |
 | `app.js` | Toute la logique |
 | `foods.js` | Aliments courants (valeurs moyennes pour 100 g) |
+| `additives.js` | Base des additifs E (rôle, origine, halal, santé) |
+| `halal.js` | Analyse halal, végan / végétarien, surlignage des ingrédients |
 | `sw.js` | Mode hors ligne |
 | `manifest.webmanifest`, icônes | Installation sur l'écran d'accueil |
 
