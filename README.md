@@ -1,44 +1,39 @@
 # NutriScan
 
-Appli de suivi des calories et des macros (protéines, glucides, lipides) avec scan de code-barres.
-Les infos des produits viennent d'Open Food Facts (base gratuite, plus de 3 millions de produits).
+Compteur de calories et de macros gratuit, avec scan de code-barres.
+Appli en ligne : **https://monkrbor.github.io/nutriscan/**
 
-## Ce qu'elle fait
+## Fonctionnalités
 
-- Scan du code-barres avec la caméra → nom, marque, Nutri-Score, calories et macros du produit
-- Choix de la quantité en grammes (ou 1 portion) et du repas
-- Recherche par nom quand il n'y a pas de code-barres
-- Création d'un aliment à la main (s'il n'est pas dans la base, il sera reconnu au prochain scan)
-- Résumé du jour : calories restantes + barres de protéines, glucides, lipides
-- Objectifs personnalisables, historique des 7 derniers jours
-- Fonctionne comme une vraie appli une fois ajoutée à l'écran d'accueil
+- **Calcul de tes besoins** au premier lancement : objectif (perdre, garder, prendre), âge, taille, poids, activité → calories, protéines, glucides, lipides et eau par jour
+- **Journal du jour** : anneau des calories restantes (mangé / restant / brûlé), barres de macros, 4 repas avec objectif par repas, navigation par semaine, série de jours suivis
+- **Scanner plein écran** : détection automatique du code-barres, lampe, zoom ×2, saisie manuelle du code en secours
+- **Fiche produit** : Nutri-Score, quantité en grammes ou en portions, répartition des macros, % de ton objectif, tableau nutritionnel complet, favoris
+- **Recherche** : 3 millions de produits du commerce (Open Food Facts) + 75 aliments courants (fruits, féculents, viandes…) qui marchent sans connexion
+- **Récents, favoris, mes aliments**, ajout en un clic avec le bouton +
+- **Ajout rapide** (juste les calories), **création d'aliments** (un code-barres inconnu est reconnu ensuite)
+- **Reprendre le repas d'hier**, vider un repas, modifier ou supprimer chaque aliment
+- **Eau** (verres de 250 ml), **activités** (calories brûlées estimées, ajoutées au budget), **poids**
+- **Progrès** : calories sur 7 ou 30 jours, macros moyennes, courbe de poids, IMC, régularité
+- **Profil** : objectifs modifiables, thème clair / sombre / automatique, sauvegarde et restauration des données
+- Fonctionne hors ligne une fois installée ; le bouton retour d'Android ferme les fenêtres
 
-Les données restent sur le téléphone (stockage du navigateur).
+Les données restent sur le téléphone (stockage du navigateur). Pense à faire une sauvegarde depuis Profil si tu changes de téléphone.
 
-## Mettre l'appli en ligne (gratuit, 5 minutes)
+## Installer sur le téléphone
 
-La caméra ne marche que sur une adresse en `https://`. Le plus simple : GitHub Pages.
+- **Android (Chrome)** : ouvre le lien, menu ⋮ → **Ajouter à l'écran d'accueil**
+- **iPhone (Safari)** : ouvre le lien, bouton Partager → **Sur l'écran d'accueil**
 
-1. Crée un compte sur https://github.com (si tu n'en as pas).
-2. Clique sur **New repository**, nomme-le `nutriscan`, coche **Public**, puis **Create repository**.
-3. Clique sur **uploading an existing file** et glisse tous les fichiers de ce dossier
-   (`index.html`, `manifest.webmanifest`, `sw.js`, les icônes). Clique sur **Commit changes**.
-4. Va dans **Settings → Pages**. Dans *Branch*, choisis `main` et `/ (root)`, puis **Save**.
-5. Attends 1 à 2 minutes. Ton appli est en ligne à l'adresse :
-   `https://TON-PSEUDO.github.io/nutriscan/`
-
-## L'installer sur ton téléphone
-
-- **Android (Chrome)** : ouvre l'adresse, menu ⋮ → **Ajouter à l'écran d'accueil** (ou **Installer l'application**).
-- **iPhone (Safari)** : ouvre l'adresse, bouton Partager → **Sur l'écran d'accueil**.
-
-Au premier scan, autorise l'accès à la caméra.
-
-## Les fichiers
+## Fichiers
 
 | Fichier | Rôle |
 |---|---|
-| `index.html` | Toute l'appli (interface + code) |
-| `manifest.webmanifest` | Nom et icône quand on l'installe sur le téléphone |
-| `sw.js` | Garde l'appli en cache pour qu'elle s'ouvre même sans réseau |
-| `icon.svg`, `icon-*.png` | Icônes |
+| `index.html` | Structure de l'appli |
+| `styles.css` | Design (thème clair et sombre) |
+| `app.js` | Toute la logique |
+| `foods.js` | Aliments courants (valeurs moyennes pour 100 g) |
+| `sw.js` | Mode hors ligne |
+| `manifest.webmanifest`, icônes | Installation sur l'écran d'accueil |
+
+Données produits : [Open Food Facts](https://world.openfoodfacts.org), licence ODbL.
