@@ -21,7 +21,9 @@ Appli en ligne : **https://monkrbor.github.io/nutriscan/**
 - **Eau** (verres de 250 ml), **activités** (calories brûlées estimées, ajoutées au budget), **poids**
 - **Progrès** : calories sur 7 ou 30 jours, macros moyennes, courbe de poids, IMC, régularité
 - **Profil** : objectifs modifiables, thème clair / sombre / automatique, sauvegarde et restauration des données
-- Fonctionne hors ligne une fois installée ; le bouton retour d'Android ferme les fenêtres
+- **Hors ligne** : tout fonctionne sans Internet (journal, scan, aliments courants et déjà vus, objectifs, progrès). Un produit jamais vu scanné hors ligne est ajouté puis complété automatiquement au retour du réseau
+- **Synchronisation** : au retour en ligne, les modifications partent vers le compte et celles des autres appareils sont fusionnées (suppressions comprises)
+- Le bouton retour d'Android ferme les fenêtres
 
 Sans compte, les données restent sur le téléphone. Avec un compte, elles sont aussi sauvegardées en ligne.
 

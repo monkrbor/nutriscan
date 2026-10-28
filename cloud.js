@@ -112,7 +112,7 @@
   async function deleteAccount() { await req('/rest/v1/rpc/delete_my_account', { method: 'POST', auth: true, body: {} }); write(null); }
 
   window.NS_CLOUDAPI = {
-    enabled, req, ensure, signUp, signIn, signOut, recover, updatePassword, fromLink, pull, push, deleteAccount,
+    enabled, req, ensure, signUp, signIn, signOut, recover, updatePassword, fromLink, pull, meta, push, deleteAccount,
     get session() { return session; }, get user() { return session && session.user; }
   };
 })();

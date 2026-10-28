@@ -16,7 +16,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=Figtree:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="styles.css?v=2.3">
+<link rel="stylesheet" href="styles.css?v=2.4">
 </head>
 <body>
 
@@ -55,12 +55,14 @@
   <symbol id="i-heart" viewBox="0 0 24 24"><path d="M12 20s-7.5-4.5-7.5-10A4.5 4.5 0 0 1 12 7a4.5 4.5 0 0 1 7.5 3c0 5.5-7.5 10-7.5 10z"/></symbol>
   <symbol id="i-alert" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7.5v5.5M12 16.5h.01"/></symbol>
   <symbol id="i-help" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.6 9.4a2.5 2.5 0 1 1 3.4 2.4c-.6.3-1 .8-1 1.5v.4M12 16.8h.01"/></symbol>
+  <symbol id="i-cloudoff" viewBox="0 0 24 24"><path d="M3 3l18 18M8.5 7.2A5.5 5.5 0 0 1 17.6 10 4 4 0 0 1 20 17.2M17 18H7a4.5 4.5 0 0 1-1.6-8.7"/></symbol>
   <symbol id="i-moonsun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 3.5v17a8.5 8.5 0 0 0 0-17z" fill="currentColor"/></symbol>
 </svg>
 
 <main class="screen" id="screen-journal">
   <header class="j-top">
     <div class="min0"><p class="hello" id="hello">Bonjour</p><h1 class="page-title" id="dayTitle">Aujourd'hui</h1></div>
+    <span class="net" id="netBadge" hidden><svg class="ic sm" aria-hidden="true"><use href="#i-cloudoff"/></svg>Hors ligne</span>
     <div class="streak" id="streak" title="Jours suivis d'affilée"><svg class="ic sm" aria-hidden="true"><use href="#i-flame"/></svg><b id="streakN">0</b></div>
   </header>
   <nav class="week" aria-label="Choisir le jour">
@@ -128,11 +130,11 @@
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 <input type="file" id="importFile" accept="application/json,.json" hidden>
 
-<script src="foods.js?v=2.3"></script>
-<script src="additives.js?v=2.3"></script>
-<script src="config.js?v=2.3"></script>
-<script src="cloud.js?v=2.3"></script>
-<script src="ingredients.js?v=2.3"></script>
-<script src="app.js?v=2.3"></script>
+<script src="foods.js?v=2.4"></script>
+<script src="additives.js?v=2.4"></script>
+<script src="config.js?v=2.4"></script>
+<script src="cloud.js?v=2.4"></script>
+<script src="ingredients.js?v=2.4"></script>
+<script src="app.js?v=2.4"></script>
 </body>
 </html>

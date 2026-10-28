@@ -1,28 +1,72 @@
-// Service worker : l'appli s'ouvre même sans réseau.
-// Fichiers de l'appli : réseau d'abord (pour recevoir les mises à jour), sinon cache.
-const CACHE = 'nutriscan-v5';
-const FILES = ['./', './index.html', './styles.css', './app.js', './foods.js', './additives.js', './ingredients.js', './config.js', './cloud.js', './manifest.webmanifest', './icon.svg', './icon-180.png', './icon-192.png', './icon-512.png'];
+// Service worker : NutriScan marche hors ligne.
+// - Fichiers de l'appli : réseau d'abord (pour recevoir les mises à jour), sinon la copie en cache.
+// - Module de scan et polices : gardés en cache pour scanner sans réseau.
+// - Fiches et photos de produits déjà consultées : copie gardée pour les revoir hors ligne.
+const CACHE = 'nutriscan-v6';
+const RUNTIME = 'nutriscan-rt-v1';
+const FILES = ['./', './index.html', './styles.css', './app.js', './foods.js', './additives.js', './ingredients.js', './config.js', './cloud.js',
+  './manifest.webmanifest', './icon.svg', './icon-180.png', './icon-192.png', './icon-512.png'];
+const LIB = 'https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js';
 
 self.addEventListener('install', e => {
-  e.waitUntil(caches.open(CACHE).then(c => c.addAll(FILES)).catch(() => {}));
+  e.waitUntil((async () => {
+    const c = await caches.open(CACHE);
+    await c.addAll(FILES).catch(() => {});
+    try { const r = await fetch(LIB, { mode: 'cors' }); if (r.ok) await c.put(LIB, r); } catch (err) { /* sera mis en cache au premier scan */ }
+  })());
   self.skipWaiting();
 });
 self.addEventListener('activate', e => {
-  e.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k)))).then(() => self.clients.claim()));
+  e.waitUntil(caches.keys()
+    .then(keys => Promise.all(keys.filter(k => k !== CACHE && k !== RUNTIME).map(k => caches.delete(k))))
+    .then(() => self.clients.claim()));
 });
+
+async function trim(cacheName, max) {
+  const c = await caches.open(cacheName), keys = await c.keys();
+  for (let i = 0; i < keys.length - max; i++) await c.delete(keys[i]);
+}
+async function cacheFirst(req, cacheName) {
+  const hit = await caches.match(req);
+  if (hit) return hit;
+  const res = await fetch(req);
+  if (res.ok || res.type === 'opaque') { const c = await caches.open(cacheName); c.put(req, res.clone()); }
+  return res;
+}
+async function networkFirst(req, cacheName, max) {
+  try {
+    const res = await fetch(req);
+    if (res.ok || res.status === 404) { const c = await caches.open(cacheName); c.put(req, res.clone()); if (max) trim(cacheName, max); }
+    return res;
+  } catch (err) {
+    const hit = await caches.match(req, { ignoreSearch: false });
+    if (hit) return hit;
+    throw err;
+  }
+}
+
 self.addEventListener('fetch', e => {
   const req = e.request;
-  const url = new URL(req.url);
   if (req.method !== 'GET') return;
-  // Module de scan (CDN) : cache d'abord, pour que le scan marche aussi avec un réseau faible
-  if (/html5-qrcode@2\.3\.8/.test(url.href)) {
-    e.respondWith(caches.match(req).then(r => r || fetch(req).then(res => { const c = res.clone(); caches.open(CACHE).then(x => x.put(req, c)); return res; })));
+  const url = new URL(req.url);
+  // Module de scan
+  if (/html5-qrcode@2\.3\.8/.test(url.href)) { e.respondWith(cacheFirst(req, CACHE)); return; }
+  // Polices
+  if (url.hostname === 'fonts.googleapis.com' || url.hostname === 'fonts.gstatic.com') { e.respondWith(cacheFirst(req, RUNTIME)); return; }
+  // Photos de produits
+  if (url.hostname === 'images.openfoodfacts.org') {
+    e.respondWith(cacheFirst(req, RUNTIME).then(r => { trim(RUNTIME, 400); return r; }).catch(() => new Response('', { status: 504 })));
     return;
   }
-  if (url.origin !== location.origin) return; // Open Food Facts : toujours en direct
+  // Fiches et recherches Open Food Facts : en direct, avec la dernière copie si pas de réseau
+  if (/(^|\.)openfoodfacts\.org$/.test(url.hostname)) { e.respondWith(networkFirst(req, RUNTIME, 400)); return; }
+  // Sauvegarde en ligne : jamais en cache
+  if (/supabase\.co$/.test(url.hostname)) return;
+  if (url.origin !== location.origin) return;
+  // Fichiers de l'appli
   e.respondWith(
     fetch(req)
       .then(res => { if (res.ok) { const copy = res.clone(); caches.open(CACHE).then(c => c.put(req, copy)); } return res; })
-      .catch(() => caches.match(req, { ignoreSearch: true }).then(r => r || caches.match('./index.html')))
+      .catch(async () => (await caches.match(req, { ignoreSearch: true })) || (req.mode === 'navigate' ? caches.match('./index.html') : Response.error()))
   );
 });

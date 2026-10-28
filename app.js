@@ -81,8 +81,14 @@
       exercises: Array.isArray(s.exercises) ? s.exercises.filter(x => x && x.date) : [],
       weights: Array.isArray(s.weights) ? s.weights.filter(w => w && w.date && w.kg > 0) : [],
       theme: ['auto', 'light', 'dark'].includes(s.theme) ? s.theme : 'auto',
-      warn: Object.assign({}, H.DEF, (s.warn && typeof s.warn === 'object') ? s.warn : (s.halal && typeof s.halal === 'object') ? s.halal : {})
+      warn: Object.assign({}, H.DEF, (s.warn && typeof s.warn === 'object') ? s.warn : (s.halal && typeof s.halal === 'object') ? s.halal : {}),
+      // Synchronisation entre appareils : dates de modification et suppressions
+      tomb: s.tomb && typeof s.tomb === 'object' ? s.tomb : {},
+      waterT: s.waterT && typeof s.waterT === 'object' ? s.waterT : {},
+      metaT: num(s.metaT)
     };
+    const old = Date.now() - 120 * 864e5;
+    Object.keys(o.tomb).forEach(k => { if (!(o.tomb[k] > old)) delete o.tomb[k]; });
     for (const k of Object.keys(o.products)) {
       const p = o.products[k];
       if (!p || !p.per100) { delete o.products[k]; continue; }
@@ -96,7 +102,10 @@
       if (!MEAL[e.meal]) e.meal = 'snack';
       if (e.amount == null) { e.amount = e.grams; e.unitIdx = 0; }
       ['kcal', 'p', 'c', 'f'].forEach(k => { e[k] = num(e[k]); });
+      if (!e.mt) e.mt = e.ts || 1;
     });
+    o.exercises.forEach(x => { if (!x.id) x.id = uid(); if (!x.mt) x.mt = 1; });
+    o.weights.forEach(w => { if (!w.mt) w.mt = 1; });
     o.weights.sort((a, b) => a.date < b.date ? -1 : 1);
     return o;
   }
@@ -110,9 +119,28 @@
   }
   let S = loadState();
   let saveWarned = false;
+  function pruneProducts() {
+    const keep = new Set(S.recents.concat(S.favorites));
+    const since = addDays(today(), -60);
+    S.entries.forEach(e => { if (e.date >= since) keep.add(e.key); });
+    Object.keys(S.products).forEach(k => {
+      const p = S.products[k];
+      if (p.source === 'custom' || keep.has(k)) { if (p.ingTags && p.ingTags.length > 20) p.ingTags = p.ingTags.slice(0, 20); return; }
+      delete S.products[k];
+    });
+  }
   function save() {
-    if (!store.set(KEY, S) && !saveWarned) { saveWarned = true; toast("Mémoire du navigateur pleine : exporte puis efface d'anciennes données"); }
+    if (!store.set(KEY, S)) {
+      pruneProducts();
+      if (!store.set(KEY, S) && !saveWarned) { saveWarned = true; toast("Mémoire du navigateur pleine : sauvegarde tes données puis efface d'anciens jours"); }
+    }
     schedulePush();
+  }
+  const now = () => Date.now();
+  const touchMeta = () => { S.metaT = now(); };
+  function removeEntries(pred) {
+    const t = now();
+    S.entries = S.entries.filter(e => { if (pred(e)) { S.tomb['e:' + e.id] = t; return false; } return true; });
   }
 
   /* ---------- Sauvegarde en ligne ---------- */
@@ -124,23 +152,54 @@
   function schedulePush() {
     if (!C.enabled || !C.session || suppressPush) return;
     SYNC.pending = true; saveSync();
-    clearTimeout(pushT); pushT = setTimeout(doPush, 2500);
+    clearTimeout(pushT); pushT = setTimeout(() => sync(), 2500);
   }
-  async function doPush() {
-    if (!C.enabled || !C.session) return false;
+  let syncing = null, syncAgain = false;
+  /* Synchronise ce téléphone avec la sauvegarde en ligne :
+     1. si un autre appareil a sauvegardé depuis, on fusionne (sans rien perdre, suppressions comprises) ;
+     2. si ce téléphone a des modifications (ou après fusion), on envoie. */
+  function sync(opts) {
+    opts = opts || {};
+    if (!C.enabled || !C.session) return Promise.resolve(false);
+    if (!navigator.onLine) { syncState = 'offline'; refreshAccountStatus(); return Promise.resolve(false); }
+    if (syncing) { syncAgain = true; return syncing; }
     clearTimeout(pushT);
-    syncState = 'saving'; refreshAccountStatus();
-    try {
-      SYNC.lastPush = await C.push(S, { device: DEVICE, consentAt: SYNC.consentAt });
-      SYNC.pending = false; saveSync(); syncState = 'idle'; syncError = '';
-      refreshAccountStatus(); return true;
-    } catch (e) {
-      syncState = e.offline ? 'offline' : 'error'; syncError = e.message || '';
-      if (e.status === 401) syncError = 'Session expirée : reconnecte-toi.';
-      refreshAccountStatus(); return false;
-    }
+    syncing = (async () => {
+      syncState = 'saving'; refreshAccountStatus();
+      let merged = false;
+      try {
+        if (!opts.force) {
+          const m = await C.meta();
+          const newer = m && m.device !== DEVICE && (!SYNC.lastPush || new Date(m.updated_at) > new Date(SYNC.lastPush));
+          if (newer) {
+            const r = await C.pull();
+            if (r && r.device === 'admin') { syncState = 'idle'; refreshAccountStatus(); if (!layers.length) offerRemote(r); return false; }
+            if (r) {
+              suppressPush = true; S = mergeStates(S, r.data); store.set(KEY, S); suppressPush = false;
+              halalVersion++; applyTheme(); renderAll(); merged = true;
+              if (OB && (S.profile || S.skipSetup)) closeOB();
+            }
+          }
+        }
+        if (merged || SYNC.pending || opts.push || opts.force) {
+          SYNC.lastPush = await C.push(S, { device: DEVICE, consentAt: SYNC.consentAt });
+        }
+        SYNC.pending = false; saveSync(); syncState = 'idle'; syncError = '';
+        refreshAccountStatus();
+        if (merged && !opts.quiet) toast('Synchronisé avec tes autres appareils');
+        return true;
+      } catch (e) {
+        syncState = e.offline ? 'offline' : 'error'; syncError = e.message || '';
+        if (e.status === 401) syncError = 'Session expirée : reconnecte-toi.';
+        refreshAccountStatus(); return false;
+      } finally {
+        syncing = null;
+        if (syncAgain) { syncAgain = false; setTimeout(() => sync(), 500); }
+      }
+    })();
+    return syncing;
   }
-  window.addEventListener('online', () => { if (SYNC.pending) doPush(); });
+  const doPush = () => sync({ push: true });
 
   /* ---------- Produits ---------- */
   const TMP = new Map();          // produits vus pendant la session (recherche, scan)
@@ -366,9 +425,9 @@
   }
   function entryRow(e) {
     const p = getP(e.key);
-    const sub = e.key === 'quick' ? 'Ajout rapide' : (e.brand ? e.brand + ' · ' : '') + amountLabel(p || { unit: e.unit }, e.unitIdx || 0, e.amount, e.grams);
+    const sub = e.pending ? f1(e.grams) + ' g · sera complété au retour d’Internet' : e.unknown ? f1(e.grams) + ' g · touche pour créer le produit' : e.key === 'quick' ? 'Ajout rapide' : (e.brand ? e.brand + ' · ' : '') + amountLabel(p || { unit: e.unit }, e.unitIdx || 0, e.amount, e.grams);
     return '<li><button class="entry" data-act="editEntry" data-id="' + esc(e.id) + '"><span class="en">' + esc(e.name) + halalPill(p) + '</span><span class="es">' + esc(sub) +
-      '</span><span class="ek num">' + fk(e.kcal) + '<small>kcal</small></span></button></li>';
+      '</span><span class="ek num">' + (e.pending ? '…' : fk(e.kcal)) + '<small>kcal</small></span></button></li>';
   }
   function renderMeals() {
     const y = addDays(day, -1);
@@ -530,7 +589,7 @@
       $('#afClear', el).hidden = !AF.q;
       clearTimeout(AF.t);
       const q = AF.q.trim();
-      if (q.length >= 3 && !/^\d+$/.test(q)) { if (SEARCH_CACHE.has(q)) offSearch(q); else AF.t = setTimeout(() => offSearch(q), 650); }
+      if (q.length >= 3 && !/^\d+$/.test(q) && navigator.onLine) { if (SEARCH_CACHE.has(q)) offSearch(q); else AF.t = setTimeout(() => offSearch(q), 650); }
       renderAF();
     });
     inp.addEventListener('keydown', e => {
@@ -604,7 +663,8 @@
     if (mine.length) html += '<p class="sect">Mes aliments</p>' + listHTML(mine);
     if (gen.length) html += '<p class="sect">Aliments courants</p>' + listHTML(gen);
     html += '<p class="sect">Produits du commerce</p>';
-    if (q.length < 3) html += '<p class="hint">Tape au moins 3 lettres pour chercher dans 3 millions de produits.</p>';
+    if (!navigator.onLine) html += '<p class="hint">Hors ligne : seuls tes aliments et les aliments courants sont disponibles. La recherche dans les produits du commerce reviendra avec Internet.</p>';
+    else if (q.length < 3) html += '<p class="hint">Tape au moins 3 lettres pour chercher dans 3 millions de produits.</p>';
     else if (AF.offState === 'loading' || AF.offState === 'idle') html += '<div class="loading"><div class="spin"></div>Recherche dans Open Food Facts…</div>';
     else if (AF.offState === 'error') html += '<div class="msg err">La recherche ne répond pas (connexion, ou trop de recherches d’affilée). <button class="linkbtn" data-act="afRetry">Réessayer</button></div>';
     else {
@@ -648,11 +708,18 @@
   /* ================= Entrées ================= */
   function addEntry(p, o) {
     const t = calc(p, o.grams);
-    S.entries.push({ id: uid(), date: day, ts: Date.now(), meal: o.meal, key: p.key, name: p.name, brand: p.brand || '', amount: o.amount, unitIdx: o.unitIdx, unit: p.unit || 'g', grams: o.grams, kcal: t.kcal, p: t.p, c: t.c, f: t.f });
+    S.entries.push({ id: uid(), date: day, ts: Date.now(), mt: now(), meal: o.meal, key: p.key, name: p.name, brand: p.brand || '', amount: o.amount, unitIdx: o.unitIdx, unit: p.unit || 'g', grams: o.grams, kcal: t.kcal, p: t.p, c: t.c, f: t.f });
     remember(p); save(); renderAll();
   }
   function editEntry(id) {
     const e = S.entries.find(x => x.id === id); if (!e) return;
+    if (e.pending || e.unknown) {
+      actionSheet(e.unknown ? 'Produit inconnu' : 'En attente de connexion', [
+        { label: e.unknown ? 'Créer ce produit' : 'Saisir les valeurs à la main', sub: 'Avec l’étiquette du paquet · code ' + e.key, icon: 'i-edit', color: 'var(--brand)', open: () => openCreate({ code: e.key, swap: true }) },
+        { label: 'Supprimer du journal', icon: 'i-trash', color: 'var(--danger)', danger: true, confirm: 'Appuie encore pour supprimer', run: () => { removeEntries(x => x.id === id); save(); renderAll(); toast('Supprimé'); } }
+      ]);
+      return;
+    }
     if (e.key === 'quick') { openQuick({ entry: e }); return; }
     openProduct(getP(e.key) || rebuildFromEntry(e), { entry: e });
   }
@@ -660,8 +727,7 @@
     const y = addDays(day, -1);
     const list = S.entries.filter(e => e.date === y && e.meal === meal);
     if (!list.length) return;
-    const now = Date.now();
-    list.forEach((e, i) => S.entries.push(Object.assign({}, e, { id: uid(), date: day, ts: now + i })));
+    list.forEach((e, i) => S.entries.push(Object.assign({}, e, { id: uid(), date: day, ts: now() + i, mt: now() })));
     save(); renderAll();
     toast(list.length + ' aliment' + (list.length > 1 ? 's' : '') + ' repris d’hier');
   }
@@ -675,7 +741,7 @@
     ];
     if (yHas) items.push({ label: 'Reprendre le repas d’hier', icon: 'i-copy', color: 'var(--water)', run: () => copyMeal(meal) });
     if (has) items.push({ label: 'Vider ce repas', icon: 'i-trash', color: 'var(--danger)', danger: true, confirm: 'Appuie encore pour tout supprimer', run: () => {
-      S.entries = S.entries.filter(e => !(e.date === day && e.meal === meal)); save(); renderAll(); toast(m.label + ' vidé');
+      removeEntries(e => e.date === day && e.meal === meal); save(); renderAll(); toast(m.label + ' vidé');
     } });
     actionSheet(m.label, items);
   }
@@ -800,19 +866,19 @@
         setInput(); update();
       } else if (act === 'fav') {
         const i = S.favorites.indexOf(p.key);
-        if (i >= 0) S.favorites.splice(i, 1); else { S.favorites.unshift(p.key); const c = Object.assign({}, p); delete c.s; S.products[p.key] = S.products[p.key] || c; }
+        if (i >= 0) { S.favorites.splice(i, 1); S.tomb['f:' + p.key] = now(); } else { S.favorites.unshift(p.key); delete S.tomb['f:' + p.key]; const c = Object.assign({}, p); delete c.s; S.products[p.key] = S.products[p.key] || c; }
         save(); const on = i < 0;
         a.classList.toggle('on', on); a.setAttribute('aria-pressed', on);
         toast(on ? 'Ajouté aux favoris' : 'Retiré des favoris');
         if (AF) renderAF();
       } else if (act === 'del') {
         if (!arm(a, 'Supprimer ?')) return;
-        S.entries = S.entries.filter(x => x.id !== ps.entry.id); save(); closeTop(); renderAll(); toast('Supprimé du journal');
+        removeEntries(x => x.id === ps.entry.id); save(); closeTop(); renderAll(); toast('Supprimé du journal');
       } else if (act === 'save') {
         const g = grams(); if (!(g > 0)) { toast('Indique une quantité'); return; }
         if (ps.entry) {
           const e2 = S.entries.find(x => x.id === ps.entry.id), t = calc(p, g);
-          if (e2) Object.assign(e2, { meal: ps.meal, amount: ps.amount, unitIdx: ps.unitIdx, unit: p.unit || 'g', grams: g, kcal: t.kcal, p: t.p, c: t.c, f: t.f, name: p.name, brand: p.brand || '' });
+          if (e2) Object.assign(e2, { meal: ps.meal, amount: ps.amount, unitIdx: ps.unitIdx, unit: p.unit || 'g', grams: g, kcal: t.kcal, p: t.p, c: t.c, f: t.f, name: p.name, brand: p.brand || '', mt: now(), pending: false, unknown: false });
           remember(p); save(); closeTop(); renderAll(); toast('Modifié');
         } else {
           if (AF) AF.meal = ps.meal;
@@ -853,14 +919,65 @@
       fillProduct(layer, p, opts);
       return;
     }
-    if (failed) {
-      box.innerHTML = head('Pas de connexion') + '<div class="msg err">Impossible de joindre Open Food Facts. Vérifie ta connexion Internet.</div>' +
-        '<div class="row-btns"><button class="btn primary" data-act="retryCode" data-code="' + esc(code) + '">Réessayer</button><button class="btn outline" data-act="createCode" data-code="' + esc(code) + '">Saisir à la main</button></div>';
-      return;
-    }
+    if (failed) { offlineScan(layer, code, opts); return; }
     box.innerHTML = head('Produit inconnu') +
       '<div class="msg">Le code <b class="num">' + esc(code) + '</b> n’est pas encore dans Open Food Facts. Crée-le en 30 secondes avec l’étiquette du paquet : il sera reconnu à chaque prochain scan.</div>' +
       '<div class="row-btns"><button class="btn primary" data-act="createCode" data-code="' + esc(code) + '">Créer ce produit</button><button class="btn outline" data-act="rescan">Scanner un autre</button></div>';
+  }
+
+  /* Hors ligne : on garde le produit scanné et on le complète au retour d'Internet */
+  function offlineScan(layer, code, opts) {
+    let meal = (opts && opts.meal) || (AF && AF.meal) || defaultMeal();
+    const box = $('.sheet-in', layer.el);
+    box.innerHTML = head(navigator.onLine ? 'Connexion trop lente' : 'Tu es hors ligne') +
+      '<div class="msg">Impossible de lire la fiche du code <b class="num">' + esc(code) + '</b> pour l’instant. Ajoute-le quand même : ses calories, ses ingrédients et ses avertissements seront <b>complétés automatiquement</b> dès le retour d’Internet.</div>' +
+      '<div class="field"><label for="olG">Quantité</label><div class="unit-input"><input id="olG" inputmode="decimal" value="100"><span>g</span></div></div>' +
+      '<div><span class="flabel">Repas</span><div class="seg" id="olMeal" style="margin-top:6px">' + MEALS.map(m => '<button data-meal="' + m.id + '">' + m.short + '</button>').join('') + '</div></div>' +
+      '<button class="btn primary" data-ol="add">Ajouter, à compléter plus tard</button>' +
+      '<div class="row-btns"><button class="btn outline" data-act="retryCode" data-code="' + esc(code) + '">Réessayer</button><button class="btn outline" data-act="createCode" data-code="' + esc(code) + '">Saisir à la main</button></div>';
+    const setMeal = () => $$('#olMeal button', box).forEach(b => b.classList.toggle('on', b.dataset.meal === meal));
+    setMeal();
+    box.onclick = ev => {
+      const mb = ev.target.closest('[data-meal]'); if (mb) { meal = mb.dataset.meal; setMeal(); return; }
+      if (!ev.target.closest('[data-ol]')) return;
+      const g = num($('#olG', box).value);
+      if (!(g > 0)) { toast('Indique une quantité'); return; }
+      S.entries.push({ id: uid(), date: day, ts: Date.now(), mt: now(), meal, key: code, name: 'Produit scanné · ' + code, brand: '', amount: g, unitIdx: 0, unit: 'g', grams: g, kcal: 0, p: 0, c: 0, f: 0, pending: true });
+      save(); closeTop(); renderAll();
+      if (AF) { AF.added++; renderAF(); }
+      toast('Ajouté : il sera complété dès que tu seras en ligne');
+    };
+  }
+  let resolving = false;
+  async function resolvePending() {
+    const codes = [...new Set(S.entries.filter(e => e.pending).map(e => e.key))];
+    if (!codes.length || resolving) return;
+    resolving = true;
+    let done = 0, unknown = 0;
+    for (const code of codes) {
+      let p = S.products[code] || TMP.get(code) || null, notFound = false;
+      if (!p) {
+        if (!navigator.onLine) break;
+        try {
+          const res = await fetch(OFF + '/api/v2/product/' + code + '.json?fields=' + FIELDS);
+          const data = await res.json().catch(() => null);
+          if (data && data.status === 1 && data.product) { p = normalizeOff(data.product, code); p.key = code; p.code = code; }
+          else if (data && data.status === 0) notFound = true;
+          else break;
+        } catch (e) { break; }
+      }
+      S.entries.forEach(e => {
+        if (!e.pending || e.key !== code) return;
+        if (p) { const t = calc(p, e.grams); Object.assign(e, { name: p.name, brand: p.brand || '', unit: p.unit || 'g', kcal: t.kcal, p: t.p, c: t.c, f: t.f, pending: false, unknown: false, mt: now() }); }
+        else if (notFound) Object.assign(e, { name: 'Produit inconnu · ' + code, pending: false, unknown: true, mt: now() });
+      });
+      if (p) { remember(p); done++; } else if (notFound) unknown++;
+    }
+    resolving = false;
+    if (done || unknown) {
+      save(); renderAll();
+      toast(done ? done + ' produit' + (done > 1 ? 's' : '') + ' scanné' + (done > 1 ? 's' : '') + ' hors ligne complété' + (done > 1 ? 's' : '') : 'Un produit scanné est inconnu : touche-le dans ton journal pour le créer');
+    }
   }
 
   /* ================= Scanner ================= */
@@ -987,13 +1104,13 @@
     el.addEventListener('click', ev => {
       const mb = ev.target.closest('[data-meal]'); if (mb) { meal = mb.dataset.meal; setMeal(); return; }
       const a = ev.target.closest('[data-qa]'); if (!a) return;
-      if (a.dataset.qa === 'del') { if (!arm(a, 'Supprimer ?')) return; S.entries = S.entries.filter(x => x.id !== e.id); save(); closeTop(); renderAll(); toast('Supprimé'); return; }
+      if (a.dataset.qa === 'del') { if (!arm(a, 'Supprimer ?')) return; removeEntries(x => x.id === e.id); save(); closeTop(); renderAll(); toast('Supprimé'); return; }
       const kcal = num($('#qK', el).value);
       if (!(kcal > 0)) { toast('Indique les calories'); $('#qK', el).focus(); return; }
       const vals = { kcal, p: num($('#qp', el).value), c: num($('#qc', el).value), f: num($('#qf', el).value) };
       const name = $('#qN', el).value.trim() || 'Ajout rapide';
-      if (e) { Object.assign(S.entries.find(x => x.id === e.id) || {}, vals, { name, meal }); }
-      else S.entries.push(Object.assign({ id: uid(), date: day, ts: Date.now(), meal, key: 'quick', name, brand: '', amount: 1, unitIdx: 0, unit: '', grams: 0 }, vals));
+      if (e) { Object.assign(S.entries.find(x => x.id === e.id) || {}, vals, { name, meal, mt: now() }); }
+      else S.entries.push(Object.assign({ id: uid(), date: day, ts: Date.now(), mt: now(), meal, key: 'quick', name, brand: '', amount: 1, unitIdx: 0, unit: '', grams: 0 }, vals));
       save(); closeTop(); renderAll();
       if (AF && !e) { AF.added++; renderAF(); }
       toast(e ? 'Modifié' : fk(kcal) + ' kcal ajoutées');
@@ -1050,6 +1167,7 @@
         hasNutri: true, source: 'custom'
       };
       S.products[prod.key] = prod; TMP.delete(prod.key);
+      S.entries.forEach(e => { if ((e.pending || e.unknown) && e.key === prod.key) { const t = calc(prod, e.grams); Object.assign(e, { name: prod.name, brand: prod.brand, kcal: t.kcal, p: t.p, c: t.c, f: t.f, pending: false, unknown: false, mt: now() }); } });
       if (p) {
         S.entries.forEach(e => { if (e.key === prod.key) { const t = calc(prod, e.grams); Object.assign(e, { name: prod.name, brand: prod.brand, kcal: t.kcal, p: t.p, c: t.c, f: t.f }); } });
         save(); closeTop(); renderAll(); if (AF) renderAF(); toast('Aliment modifié');
@@ -1084,7 +1202,7 @@
       if (ev.target.closest('[data-xa]')) {
         const kcal = num($('#exK', el).value);
         if (!(kcal > 0)) { toast('Indique une durée ou des calories'); return; }
-        S.exercises.push({ id: uid(), date: day, name: act.label, minutes, kcal: Math.round(kcal) });
+        S.exercises.push({ id: uid(), date: day, name: act.label, minutes, kcal: Math.round(kcal), mt: now() });
         save(); closeTop(); renderAll(); toast('+' + fk(kcal) + ' kcal ajoutées à ton budget');
       }
     });
@@ -1093,12 +1211,12 @@
   function openExMenu(id) {
     const x = S.exercises.find(e => e.id === id); if (!x) return;
     actionSheet(x.name + ' · ' + fk(x.kcal) + ' kcal', [
-      { label: 'Supprimer cette activité', icon: 'i-trash', color: 'var(--danger)', danger: true, confirm: 'Appuie encore pour supprimer', run: () => { S.exercises = S.exercises.filter(e => e.id !== id); save(); renderAll(); toast('Activité supprimée'); } }
+      { label: 'Supprimer cette activité', icon: 'i-trash', color: 'var(--danger)', danger: true, confirm: 'Appuie encore pour supprimer', run: () => { S.exercises = S.exercises.filter(e => e.id !== id); S.tomb['x:' + id] = now(); save(); renderAll(); toast('Activité supprimée'); } }
     ]);
   }
 
   /* ================= Eau ================= */
-  function setWater(ml) { S.water[day] = clamp(Math.round(ml), 0, 10000); if (!S.water[day]) delete S.water[day]; save(); renderWater(); }
+  function setWater(ml) { S.water[day] = clamp(Math.round(ml), 0, 10000); if (!S.water[day]) delete S.water[day]; S.waterT[day] = now(); save(); renderWater(); }
   function tapGlass(i) {
     const filled = Math.floor(num(S.water[day]) / 250 + 1e-9);
     setWater((i + 1 === filled ? i : i + 1) * 250);
@@ -1121,9 +1239,9 @@
       const a = ev.target.closest('[data-wa]'); if (!a) return;
       const t = a.dataset.wa;
       if (t === '-' || t === '+') { kg = Math.max(0, Math.round((kg + (t === '+' ? 0.1 : -0.1)) * 10) / 10); show(); return; }
-      if (t === 'del') { if (!arm(a, 'Supprimer ?')) return; S.weights = S.weights.filter(w => w.date !== day); save(); closeTop(); renderAll(); toast('Pesée supprimée'); return; }
+      if (t === 'del') { if (!arm(a, 'Supprimer ?')) return; S.weights = S.weights.filter(w => w.date !== day); S.tomb['w:' + day] = now(); save(); closeTop(); renderAll(); toast('Pesée supprimée'); return; }
       if (!(kg >= 25 && kg <= 350)) { toast('Indique un poids valide'); return; }
-      S.weights = S.weights.filter(w => w.date !== day).concat([{ date: day, kg: Math.round(kg * 10) / 10 }]).sort((a2, b) => a2.date < b.date ? -1 : 1);
+      S.weights = S.weights.filter(w => w.date !== day).concat([{ date: day, kg: Math.round(kg * 10) / 10, mt: now() }]).sort((a2, b) => a2.date < b.date ? -1 : 1);
       if (S.profile && S.weights[S.weights.length - 1].date === day) S.profile.weight = Math.round(kg * 10) / 10;
       save(); closeTop(); renderAll(); toast('Poids enregistré : ' + fkg(kg) + ' kg');
     });
@@ -1155,6 +1273,7 @@
       const kcal = num($('#gK', el).value);
       if (!(kcal >= 800 && kcal <= 6000)) { toast('Objectif calorique entre 800 et 6 000 kcal'); return; }
       S.goals = { kcal: r0(kcal), p: r0(num($('#gp', el).value)), c: r0(num($('#gc', el).value)), f: r0(num($('#gf', el).value)), water: clamp(r0(num($('#gW', el).value)) || 2000, 500, 6000) };
+      touchMeta();
       save(); closeTop(); renderAll(); toast('Objectifs enregistrés');
     });
     split();
@@ -1395,27 +1514,46 @@
     saveSync(); if (tab === 'profile') renderProfile();
   }
   function mergeStates(a, b) {
-    const by = (x, y, k) => { const m = new Map(); (y || []).forEach(e => m.set(e[k], e)); (x || []).forEach(e => m.set(e[k], e)); return [...m.values()]; };
+    a = fixState(a); b = fixState(b);
+    const tomb = Object.assign({}, b.tomb);
+    Object.keys(a.tomb).forEach(k => { tomb[k] = Math.max(tomb[k] || 0, a.tomb[k]); });
+    // Pour chaque élément, la version modifiée le plus récemment gagne ; un élément supprimé après sa dernière modification reste supprimé
+    const pick = (x, y, keyOf, prefix) => {
+      const m = new Map();
+      y.concat(x).forEach(e => { const k = keyOf(e), prev = m.get(k); if (!prev || (e.mt || 0) >= (prev.mt || 0)) m.set(k, e); });
+      return [...m.values()].filter(e => { const t = tomb[prefix + keyOf(e)]; return !t || (e.mt || 0) > t; });
+    };
     const o = fixState(a);
-    o.entries = by(a.entries, b.entries, 'id');
-    o.exercises = by(a.exercises, b.exercises, 'id');
-    o.weights = by(a.weights, b.weights, 'date').sort((x, y) => x.date < y.date ? -1 : 1);
-    o.water = Object.assign({}, b.water);
-    Object.keys(a.water || {}).forEach(d => { o.water[d] = Math.max(num(a.water[d]), num(b.water[d])); });
+    o.tomb = tomb;
+    o.entries = pick(a.entries, b.entries, e => e.id, 'e:');
+    o.exercises = pick(a.exercises, b.exercises, e => e.id, 'x:');
+    o.weights = pick(a.weights, b.weights, w => w.date, 'w:').sort((x, y) => x.date < y.date ? -1 : 1);
+    o.water = {}; o.waterT = {};
+    new Set(Object.keys(a.water).concat(Object.keys(b.water), Object.keys(a.waterT), Object.keys(b.waterT))).forEach(d => {
+      const ta = a.waterT[d] || 0, tb = b.waterT[d] || 0;
+      const v = ta >= tb ? (a.water[d] != null ? a.water[d] : (ta ? 0 : b.water[d])) : b.water[d];
+      if (num(v) > 0) o.water[d] = num(v);
+      if (ta || tb) o.waterT[d] = Math.max(ta, tb);
+    });
     o.products = Object.assign({}, b.products, a.products);
-    o.recents = [...new Set((a.recents || []).concat(b.recents || []))].slice(0, 40);
-    o.favorites = [...new Set((a.favorites || []).concat(b.favorites || []))];
-    if (!a.profile && b.profile) { o.profile = b.profile; o.goals = b.goals; }
+    o.recents = [...new Set(a.recents.concat(b.recents))].slice(0, 40);
+    o.favorites = [...new Set(a.favorites.concat(b.favorites))].filter(k => !tomb['f:' + k] || (a.favorites.includes(k) && !a.tomb['f:' + k]));
+    const latest = (a.metaT || 0) >= (b.metaT || 0) ? a : b;
+    o.profile = latest.profile || a.profile || b.profile;
+    o.goals = latest.profile || !(a.profile || b.profile) ? latest.goals : (a.profile ? a.goals : b.goals);
+    o.warn = latest.warn; o.theme = latest.theme;
+    o.metaT = Math.max(a.metaT || 0, b.metaT || 0);
     o.skipSetup = !!(a.skipSetup || b.skipSetup);
     return fixState(o);
   }
-  function applyRemote(data, merge) {
+  function applyRemote(data, merge, remoteAt) {
     suppressPush = true;
     S = merge ? mergeStates(S, fixState(data)) : fixState(data);
     halalVersion++; save(); suppressPush = false;
+    if (remoteAt) { SYNC.lastPush = remoteAt; saveSync(); }
     applyTheme(); renderAll();
     if (OB && (S.profile || S.skipSetup)) closeOB();
-    doPush();
+    sync({ push: true, force: true, quiet: true });
   }
   function offerRemote(r, fromLogin) {
     const d = new Date(r.updated_at);
@@ -1423,17 +1561,17 @@
     const when = d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }) + ' à ' + d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
     const title = r.device === 'admin' ? 'Ton compte a été restauré' : fromLogin ? 'Une sauvegarde existe déjà' : 'Sauvegarde plus récente trouvée';
     actionSheet(title, [
-      { label: 'Récupérer la sauvegarde en ligne', sub: 'Du ' + when + ' · ' + n + ' aliment' + (n > 1 ? 's' : '') + ' · remplace ce téléphone', icon: 'i-download', color: 'var(--brand)', run: () => { applyRemote(r.data); toast('Sauvegarde récupérée'); } },
-      { label: 'Fusionner les deux', sub: 'Garde tout ce qui est sur ce téléphone et en ligne', icon: 'i-copy', color: 'var(--water)', run: () => { applyRemote(r.data, true); toast('Données fusionnées'); } },
-      { label: 'Garder ce téléphone', sub: 'Remplace la sauvegarde en ligne par ce téléphone', icon: 'i-upload', color: 'var(--muted)', run: () => { doPush().then(ok => ok && toast('Sauvegarde en ligne mise à jour')); } }
+      { label: 'Récupérer la sauvegarde en ligne', sub: 'Du ' + when + ' · ' + n + ' aliment' + (n > 1 ? 's' : '') + ' · remplace ce téléphone', icon: 'i-download', color: 'var(--brand)', run: () => { applyRemote(r.data, false, r.updated_at); toast('Sauvegarde récupérée'); } },
+      { label: 'Fusionner les deux', sub: 'Garde tout ce qui est sur ce téléphone et en ligne', icon: 'i-copy', color: 'var(--water)', run: () => { applyRemote(r.data, true, r.updated_at); toast('Données fusionnées'); } },
+      { label: 'Garder ce téléphone', sub: 'Remplace la sauvegarde en ligne par ce téléphone', icon: 'i-upload', color: 'var(--muted)', run: () => { sync({ force: true }).then(ok => ok && toast('Sauvegarde en ligne mise à jour')); } }
     ]);
   }
   async function afterLogin() {
     let r = null;
     try { r = await C.pull(); } catch (e) { toast(e.message); }
     const localHas = S.entries.length > 0 || !!S.profile;
-    if (!r) { const ok = await doPush(); toast(ok ? 'Compte prêt : tes données sont sauvegardées en ligne' : 'Connecté'); }
-    else if (!localHas) { applyRemote(r.data); toast('Connecté : ta sauvegarde a été récupérée'); }
+    if (!r) { const ok = await sync({ force: true }); toast(ok ? 'Compte prêt : tes données sont sauvegardées en ligne' : 'Connecté'); }
+    else if (!localHas) { applyRemote(r.data, false, r.updated_at); toast('Connecté : ta sauvegarde a été récupérée'); }
     else offerRemote(r, true);
     renderAll();
     checkAdmin();
@@ -1445,13 +1583,8 @@
     else if (link && link.type === 'recovery') { renderAll(); openNewPassword(); return; }
     else if (link) { toast('Adresse confirmée : tu es connecté'); await afterLogin(); return; }
     if (!C.session) return;
-    if (SYNC.pending) doPush();
-    try {
-      const r = await C.pull();
-      if (r && r.device !== DEVICE && (!SYNC.lastPush || new Date(r.updated_at) > new Date(SYNC.lastPush))) { if (!layers.length) offerRemote(r); }
-      else if (!r) doPush();
-    } catch (e) { /* hors ligne */ }
-    checkAdmin();
+    await sync({ push: !SYNC.lastPush });
+    if (navigator.onLine) checkAdmin();
   }
 
   function halalSettingsHTML() {
@@ -1499,7 +1632,7 @@
       try {
         const data = JSON.parse(r.result);
         if (!data || !Array.isArray(data.entries)) throw new Error('format');
-        S = fixState(data); halalVersion++; save(); applyTheme(); renderAll(); toast('Sauvegarde restaurée (' + S.entries.length + ' aliments)');
+        S = fixState(data); halalVersion++; suppressPush = true; save(); suppressPush = false; if (C.session) sync({ force: true, quiet: true }); applyTheme(); renderAll(); toast('Sauvegarde restaurée (' + S.entries.length + ' aliments)');
       } catch (e) { toast('Ce fichier n’est pas une sauvegarde NutriScan'); }
     };
     r.readAsText(f);
@@ -1614,11 +1747,11 @@
     const d = OB.d, r = computePlan(d);
     const prof = { name: d.name.trim(), goal: d.goal, sex: d.sex, age: r0(num(d.age)), height: r0(num(d.height)), weight: Math.round(num(d.weight) * 10) / 10,
       goalWeight: d.goal === 'maintain' ? null : Math.round(num(d.goalWeight) * 10) / 10, rate: d.rate, activity: d.activity };
-    S.profile = prof; S.skipSetup = false;
+    S.profile = prof; S.skipSetup = false; touchMeta();
     S.goals = { kcal: r.kcal, p: r.p, c: r.c, f: r.f, water: r.water };
     const t = today(), lw = latestWeight();
     if (!S.weights.length || Math.abs(lw - prof.weight) > 0.01) {
-      S.weights = S.weights.filter(w => w.date !== t).concat([{ date: t, kg: prof.weight }]).sort((a, b) => a.date < b.date ? -1 : 1);
+      S.weights = S.weights.filter(w => w.date !== t).concat([{ date: t, kg: prof.weight, mt: now() }]).sort((a, b) => a.date < b.date ? -1 : 1);
     }
     const edit = OB.edit;
     save(); closeOB(); renderAll();
@@ -1690,10 +1823,10 @@
     range: b => { range = +b.dataset.r; renderProgress(); },
     editGoals: () => openGoals(),
     editProfile: () => openOnboarding(!!S.profile),
-    theme: b => { S.theme = b.dataset.t; save(); applyTheme(); renderProfile(); },
+    theme: b => { S.theme = b.dataset.t; touchMeta(); save(); applyTheme(); renderProfile(); },
     halalSet: b => {
       const k = b.dataset.k, v = b.dataset.v;
-      S.warn[k] = k === 'on' ? v === 'true' : v;
+      S.warn[k] = k === 'on' ? v === 'true' : v; touchMeta();
       halalVersion++; save(); renderAll();
     },
     myFoods: () => openFoodList('mine'),
@@ -1703,7 +1836,7 @@
     auth: b => openAuth(b.dataset.m),
     privacy: () => openPrivacy(),
     privacyPush: () => openPrivacy(),
-    syncNow: () => { doPush().then(ok => toast(ok ? 'Sauvegardé en ligne' : (syncError || 'Sauvegarde impossible pour l’instant'))); },
+    syncNow: () => { sync({ push: true }).then(ok => toast(ok ? 'Sauvegardé en ligne' : (navigator.onLine ? (syncError || 'Sauvegarde impossible pour l’instant') : 'Hors ligne : ce sera envoyé au retour d’Internet'))); },
     syncPull: async () => { try { const r = await C.pull(); if (r) offerRemote(r); else toast('Aucune sauvegarde en ligne pour l’instant'); } catch (e) { toast(e.message); } },
     newPassword: () => openNewPassword(),
     logout: async () => { await C.signOut(); SYNC.admin = false; SYNC.pending = false; saveSync(); renderAll(); toast('Déconnecté : tes données restent sur ce téléphone'); },
@@ -1712,7 +1845,7 @@
       catch (e) { toast(e.message); }
     },
     wipe: () => {
-      const theme = S.theme, warn = S.warn; S = fixState({ theme, warn }); save(); TMP.clear(); setDay(today()); switchTab('journal'); toast('Toutes les données ont été effacées'); openOnboarding(false);
+      const theme = S.theme, warn = S.warn; S = fixState({ theme, warn, metaT: now() }); suppressPush = true; save(); suppressPush = false; if (C.session) sync({ force: true, quiet: true }); TMP.clear(); setDay(today()); switchTab('journal'); toast('Toutes les données ont été effacées'); openOnboarding(false);
     },
     afMealPick: () => {
       if (!AF) return;
@@ -1768,6 +1901,17 @@
     stopScan().then(() => lookupCode(code, { swap: true, fromScan: true }));
   });
 
+  // Connexion : indicateur, synchronisation et produits à compléter au retour du réseau
+  function renderNet() { const b = $('#netBadge'); if (b) b.hidden = navigator.onLine; }
+  window.addEventListener('offline', () => { renderNet(); refreshAccountStatus(); toast('Hors ligne : tout reste enregistré sur ton téléphone'); });
+  window.addEventListener('online', () => {
+    renderNet();
+    toast('De retour en ligne');
+    resolvePending();
+    sync();
+    if (AF && AF.q.trim().length >= 3) offSearch(AF.q.trim());
+  });
+
   // Changement de jour pendant que l'appli reste ouverte + coupure caméra en arrière-plan
   let lastToday = today();
   document.addEventListener('visibilitychange', () => {
@@ -1775,6 +1919,7 @@
     const t = today();
     if (t !== lastToday) { if (day === lastToday) { day = t; weekStart = mondayOf(t); } lastToday = t; renderAll(); }
     if (scannerOpen() && !SC.running && !SC.handled && topLayer() && topLayer().kind === 'scanner') startScan();
+    if (navigator.onLine) { resolvePending(); if (C.session) sync({ quiet: false }); }
   });
   let resizeT;
   window.addEventListener('resize', () => { clearTimeout(resizeT); resizeT = setTimeout(() => { if (tab === 'progress') renderProgress(); }, 200); });
@@ -1785,7 +1930,9 @@
   renderAll();
   if (!S.profile && !S.skipSetup && !/access_token=/.test(location.hash)) openOnboarding(false);
   cloudStart();
-  if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
+  if ('serviceWorker' in navigator && window.isSecureContext) navigator.serviceWorker.register('sw.js').catch(() => {});
+  renderNet();
+  if (navigator.onLine) setTimeout(resolvePending, 1500);
   setTimeout(() => { loadScanLib().catch(() => {}); }, 2000);
 
   // Accès pour les tests automatisés
