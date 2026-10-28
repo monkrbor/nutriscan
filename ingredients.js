@@ -1,10 +1,12 @@
-/* Vérification halal, végan / végétarien et additifs, à partir des ingrédients.
-   L'appli ne donne pas de verdict religieux : elle dit ce que contient le produit.
-   Couleurs : red = contient un ingrédient sensible, orange = à vérifier, sinon rien de détecté. */
+/* Avertissements sur les ingrédients, statut végan / végétarien et additifs.
+   L'appli ne donne aucun verdict : elle dit ce que contient le produit.
+   Couleurs : red = le produit contient l'ingrédient, orange = origine incertaine ou à vérifier.
+   Catégories : core (porc, gélatine, alcool, sang), origin (viande, origine animale possible),
+                additive (additifs controversés, huile de palme, édulcorants), allergen (allergènes). */
 (function () {
   'use strict';
   const ADD = window.NS_ADD || {};
-  const DEF = { on: true, meat: 'orange', alcohol: 'red', unc: 'orange' };
+  const DEF = { on: true, meat: 'orange', alcohol: 'red', unc: 'orange', adds: 'on', allerg: 'on' };
 
   /* ---------- Texte normalisé (sans accents, minuscules) ---------- */
   function normMap(src) {
@@ -62,6 +64,29 @@
   const NOT_DAIRY = W("beurre de cacahuetes?|beurre de cacao|beurre d'arachide|cocoa butter|peanut butter|lait de coco|lait d'amandes?|lait de soja|lait d'avoine|lait de riz|coconut milk|almond milk|soy milk|oat milk|creme de coco|coconut cream|creme de marrons|sans lactose|sans lait");
   const VEGETAL_AFTER = /^[^,;.]{0,40}(vegeta|colza|tournesol|palme|soja|vegetable|sunflower|rapeseed|palm|microbien|microbial)/;
 
+  const PALM = W("huiles? de palme|huile de palmiste|graisses? de palme|matieres? grasses? de palme|palme|palmiste|palm oil|palm kernel|palm fat");
+  const SWEET = new Set(['e950', 'e951', 'e952', 'e954', 'e955', 'e957', 'e959', 'e960', 'e960a', 'e961', 'e962', 'e969']);
+  const SWEET_WORDS = W('aspartame|acesulfame|sucralose|saccharine|cyclamates?|steviol|stevia|neotame|advantame');
+  const ALLERGEN_WORDS = [
+    ['gluten', "gluten|ble|farines? de ble|froment|seigle|orge|avoine|epeautre|kamut|pain|pates|semoule|couscous|biere|malt|baguette|croissants?|pizza|cereales|chapelure|wheat|barley|rye|oats?"],
+    ['lait', "lait|laits|fromages?|beurre|cremes?|yaourts?|skyr|lactose|lactoserum|emmental|mozzarella|camembert|parmesan|mascarpone|ricotta|whey|milk|butter|cheese|cream"],
+    ['œufs', "oeufs?|eggs?"],
+    ['arachides', "arachides?|cacahuetes?|peanuts?"],
+    ['fruits à coque', "amandes?|noisettes?|noix(?! de coco)|cajou|pistaches?|pecan|macadamia|hazelnuts?|almonds?|walnuts?|cashews?"],
+    ['soja', "soja|soy|tofu"],
+    ['poisson', "poissons?|thon|saumon|cabillaud|anchois|sardines?|colin|merlu|truite|morue|maquereaux?|sushi|fish|tuna|salmon"],
+    ['crustacés', "crevettes?|crabes?|homards?|langoustines?|ecrevisses?|shrimps?|prawns?|crab|lobster"],
+    ['mollusques', "moules?|calamars?|poulpes?|huitres?|seiches?|coquilles saint-jacques|mussels?|squid|oysters?"],
+    ['sésame', "sesame|tahini|tahin"],
+    ['céleri', "celeri|celery"],
+    ['moutarde', "moutarde|mustard"],
+    ['sulfites', "sulfites?|disulfites?|anhydride sulfureux|e ?22[0-8]"],
+    ['lupin', "lupin"]
+  ].map(x => [x[0], W(x[1])]);
+  const CORE = new Set(['traces-porc', 'traces-gelatine', 'traces-alcool', 'alcool-trace-vanille', 'alcool-trace-vinaigre', 'vinaigre', 'alcool', 'porc', 'gelatine', 'sang']);
+  const ADDCAT = new Set(['adds-avoid', 'adds-limit', 'sweet', 'palme']);
+  const catOf = k => CORE.has(k) ? 'core' : ADDCAT.has(k) ? 'additive' : (k === 'allergenes' || k === 'traces-allerg') ? 'allergen' : 'origin';
+  const CAT_ORDER = { core: 0, origin: 1, additive: 2, allergen: 3 };
   const ORDER = { orange: 1, red: 2 };
   function lookupAdd(code) {
     if (ADD[code]) return ADD[code];
@@ -98,9 +123,8 @@
     const hits = []; // termes trouvés (pour le surlignage)
     function add(key, level, title, why, term, extra) {
       if (!level || level === 'off') return;
-      if (certified && level === 'red') { level = 'orange'; why = 'Malgré le label halal : ' + why.charAt(0).toLowerCase() + why.slice(1); }
       const prev = reasons.get(key);
-      if (!prev) reasons.set(key, Object.assign({ key, level, title, why, terms: term ? [term] : [] }, extra || {}));
+      if (!prev) reasons.set(key, Object.assign({ key, level, title, why, cat: catOf(key), terms: term ? [term] : [] }, extra || {}));
       else {
         if (ORDER[level] > ORDER[prev.level]) { prev.level = level; prev.why = why; prev.title = title; }
         if (term && !prev.terms.includes(term)) prev.terms.push(term);
@@ -139,7 +163,7 @@
       const a = after(text, e, 30), b = before(text, s, 20);
       if (VEG_NEAR.test(a.slice(0, 22)) && !/halal/.test(a.slice(0, 22)) && !NOT_PORK_AFTER.test(a)) { return; }
       if (/halal/.test(a.slice(0, 25)) || /halal\s*$/.test(b)) { veg.meat = true; return; }
-      if (NOT_PORK_AFTER.test(a) || NOT_PORK_BEFORE.test(b)) { veg.meat = true; if (!certified) add('viande', cfg.meat, 'Viande sans label halal', 'Contient de la viande et aucun label halal n’a été trouvé : à vérifier.', term); return; }
+      if (NOT_PORK_AFTER.test(a) || NOT_PORK_BEFORE.test(b)) { veg.meat = true; if (!certified) add('viande', cfg.meat, 'Viande (abattage non précisé)', 'Contient de la viande ou un dérivé ; l’étiquette ne précise pas l’abattage.', term); return; }
       veg.meat = true;
       add('porc', 'red', 'Porc (charcuterie)', 'Charcuterie sans autre viande précisée : en général à base de porc (' + term + ').', term);
     });
@@ -150,14 +174,14 @@
       if (/halal/.test(a) || /halal\s*$/.test(b)) { veg.meat = true; return; }
       veg.meat = true;
       if (/(porc|pork)/.test(term + a) || /pork\s*$/.test(b)) { add('gelatine', 'red', 'Gélatine de porc', 'Contient de la gélatine de porc.', term); return; }
-      if (/(bovin|boeuf|beef)/.test(term + a) || /(beef|bovine)\s*$/.test(b)) { if (!certified) add('gelatine', cfg.meat, 'Gélatine de bœuf', 'Gélatine de bœuf sans label halal : à vérifier.', term); return; }
+      if (/(bovin|boeuf|beef)/.test(term + a) || /(beef|bovine)\s*$/.test(b)) { if (!certified) add('gelatine', cfg.meat, 'Gélatine de bœuf', 'Gélatine de bœuf : l’étiquette ne précise pas l’abattage.', term); return; }
       add('gelatine', 'red', 'Gélatine', 'Origine non précisée : en Europe, la gélatine vient le plus souvent du porc.', term);
     });
     // 7) Sang
     each(text, BLOOD, term => { veg.meat = true; add('sang', 'red', 'Sang', 'Contient du sang.', term); });
     // 8) Insectes
-    each(text, INSECT, term => { veg.insect = true; add('insectes', cfg.unc, 'Insectes (carmin / gomme laque)', 'Issu d’insectes : les avis divergent selon les écoles.', term); });
-    // 9) Viande sans label
+    each(text, INSECT, term => { veg.insect = true; add('insectes', cfg.unc, 'Insectes (carmin / gomme laque)', 'Colorant ou enrobage fabriqué à partir d’insectes.', term); });
+    // 9) Viande (abattage non précisé)
     each(text, MEAT, (term, s, e) => {
       const a = after(text, e, 25), b = before(text, s, 12);
       if (/sans\s*$/.test(b) || /(vegeta|vegan|soja|facon|soy|plant)/.test(b + ' ' + a.slice(0, 15))) return;
@@ -165,7 +189,7 @@
       if (/^\s*de (morue|poisson|lotte)/.test(a)) { veg.fish = true; return; }
       veg.meat = true;
       if (certified || /halal/.test(a) || /halal\s*$/.test(b)) return;
-      add('viande', cfg.meat, 'Viande sans label halal', 'Contient de la viande ou un dérivé et aucun label halal n’a été trouvé : à vérifier (abattage).', term);
+      add('viande', cfg.meat, 'Viande (abattage non précisé)', 'Contient de la viande ou un dérivé ; l’étiquette ne précise pas l’abattage.', term);
     });
     // 10) Origine animale possible
     const vegOk = new Set();
@@ -188,7 +212,7 @@
         if (/gelatine[^,;.]{0,25}(poisson|halal)|(fish|poisson) gelatin/.test(fullText)) return;
         veg.meat = true;
         add('gelatine', 'red', 'Gélatine', 'Origine non précisée : en Europe, la gélatine vient le plus souvent du porc.', a.code);
-      } else if (info.halal === 'i') { veg.insect = true; add('insectes', cfg.unc, 'Insectes (carmin / gomme laque)', 'Issu d’insectes : les avis divergent selon les écoles.', a.code); }
+      } else if (info.halal === 'i') { veg.insect = true; add('insectes', cfg.unc, 'Insectes (carmin / gomme laque)', 'Colorant ou enrobage fabriqué à partir d’insectes.', a.code); }
       else if (info.halal === 'b') { veg.meat = true; if (!certified) add('e542', cfg.meat, label, 'Fabriqué à partir d’os d’animaux : à vérifier.', a.code); }
       else if (info.halal === 'u' && !certified && !near) { veg.maybe = true; add(a.code.replace(/[a-g]$/, '') === 'e472' ? 'e472' : a.code, cfg.unc, label, 'Origine animale ou végétale non précisée sur l’étiquette.', a.code); }
       if (/oeuf|lait|abeille/.test(norm(info.origin))) veg.dairy = true;
@@ -199,13 +223,43 @@
     each(vtext, FISH, () => { veg.fish = true; });
     each(vtext, DAIRY, () => { veg.dairy = true; });
 
+    // 13) Additifs controversés, huile de palme, édulcorants
+    if (cfg.adds !== 'off') {
+      const nm = a => { const n = a.info.name.replace(/ \(.*\)$/, ''); return 'E' + a.code.slice(1) + ' (' + n.charAt(0).toLowerCase() + n.slice(1) + ')'; };
+      const known = adds.filter(a => a.info);
+      const sweet = known.filter(a => SWEET.has(a.code));
+      const avoid = known.filter(a => a.info.level === 2 && !SWEET.has(a.code));
+      const limit = known.filter(a => a.info.level === 1 && !SWEET.has(a.code));
+      if (avoid.length) add('adds-avoid', 'red', avoid.length > 1 ? 'Additifs à éviter' : 'Additif à éviter', avoid.map(a => nm(a) + ' : ' + a.info.health).join(' '), avoid[0].code);
+      avoid.slice(1).forEach(a => hits.push({ term: a.code, level: 'red' }));
+      if (limit.length) add('adds-limit', 'orange', limit.length > 1 ? limit.length + ' additifs à limiter' : 'Additif à limiter', limit.map(nm).join(', ') + '. Détail plus bas.', null);
+      let sw = sweet.map(nm);
+      each(text, SWEET_WORDS, term => { if (!sw.some(x => norm(x).includes(term.slice(0, 6)))) sw.push(term); });
+      if (sw.length) add('sweet', 'orange', 'Édulcorants', 'Contient : ' + sw.join(', ') + '.', null);
+      each(text, PALM, term => add('palme', 'orange', 'Huile de palme', 'Riche en graisses saturées ; sa culture est liée à la déforestation.', term));
+    }
+    // 14) Allergènes
+    if (cfg.allerg !== 'off') {
+      const names = new Set(allergenNames(p.allergens));
+      let atext = text;
+      each(atext, NOT_DAIRY, (t, s, e) => { if (!/sans/.test(t)) atext = blank(atext, s, e); });
+      if (isGen || !(p.allergens && p.allergens.length)) ALLERGEN_WORDS.forEach(([n, re]) => { re.lastIndex = 0; if (re.test(atext)) names.add(n); });
+      if (/beurre de cacahuete|beurre d'arachide|peanut butter/.test(text)) names.add('arachides');
+      if (/lait de soja|soy milk/.test(text)) names.add('soja');
+      if (/lait d'amande|almond milk/.test(text)) names.add('fruits à coque');
+      if (names.size) add('allergenes', 'orange', 'Allergènes', 'Contient : ' + [...names].join(', ') + '.', null);
+      const tr = new Set(allergenNames(p.traces));
+      ALLERGEN_WORDS.forEach(([n, re]) => { re.lastIndex = 0; if (re.test(traces) && !names.has(n)) tr.add(n); });
+      names.forEach(n => tr.delete(n));
+      if (tr.size) add('traces-allerg', 'orange', 'Traces possibles', 'Peut contenir : ' + [...tr].join(', ') + '.', null);
+    }
+
     if (reasons.has('porc')) reasons.delete('viande');
-    const list = [...reasons.values()].sort((a, b) => ORDER[b.level] - ORDER[a.level]);
+    const list = [...reasons.values()].sort((a, b) => ORDER[b.level] - ORDER[a.level] || CAT_ORDER[a.cat] - CAT_ORDER[b.cat]);
     const level = list.length ? list[0].level : null;
     let status;
     if (!cfg.on) status = 'off';
     else if (level) status = level;
-    else if (certified) status = 'cert';
     else if (!hasData) status = 'unknown';
     else status = 'ok';
 
@@ -246,12 +300,12 @@
   }
 
   /* ---------- Allergènes ---------- */
-  const ALLERG = {
+  var ALLERG = {
     'gluten': 'gluten', 'milk': 'lait', 'eggs': 'œufs', 'nuts': 'fruits à coque', 'peanuts': 'arachides', 'soybeans': 'soja',
     'sesame-seeds': 'sésame', 'celery': 'céleri', 'mustard': 'moutarde', 'fish': 'poisson', 'crustaceans': 'crustacés',
     'molluscs': 'mollusques', 'lupin': 'lupin', 'sulphur-dioxide-and-sulphites': 'sulfites'
   };
-  const allergenNames = tags => [...new Set((tags || []).map(t => { const k = String(t).replace(/^[a-z]{2}:/, ''); return ALLERG[k] || k.replace(/-/g, ' '); }))];
+  function allergenNames(tags) { return [...new Set((tags || []).map(t => { const k = String(t).replace(/^[a-z]{2}:/, ''); return ALLERG[k] || k.replace(/-/g, ' '); }))]; }
 
-  window.NS_HALAL = { DEF, analyze, additivesOf, highlight, allergenNames, norm };
+  window.NS_ING = { DEF, analyze, additivesOf, highlight, allergenNames, norm };
 })();

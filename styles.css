@@ -195,7 +195,7 @@ svg.ic.sm{width:18px;height:18px}
 /* ---------- Champs ---------- */
 .field{display:flex;flex-direction:column;gap:6px;min-width:0}
 .field>label,.flabel{font-size:13px;font-weight:700;color:var(--muted)}
-input[type=text],input[type=search],input:not([type]),input[type=number]{font:inherit;font-size:16px;color:var(--ink);background:var(--surface);border:1.5px solid var(--line);border-radius:14px;height:50px;padding:0 14px;width:100%;min-width:0;-webkit-appearance:none;appearance:none}
+input[type=text],input[type=search],input[type=email],input[type=password],input:not([type]),input[type=number]{font:inherit;font-size:16px;color:var(--ink);background:var(--surface);border:1.5px solid var(--line);border-radius:14px;height:50px;padding:0 14px;width:100%;min-width:0;-webkit-appearance:none;appearance:none}
 input:focus{border-color:var(--brand);outline:none}
 input::placeholder{color:var(--faint)}
 .unit-input{position:relative}
@@ -430,3 +430,11 @@ mark.hl-orange{background:var(--warn-soft);color:var(--warn-text);font-weight:80
 .setrow{display:flex;flex-direction:column;gap:6px;padding:10px 0;border-top:1px solid var(--line)}
 .card-title+.setrow{border-top:0;padding-top:0}
 .setrow>span{font-size:14px;font-weight:700}
+
+/* ---------- Compte ---------- */
+.check{display:flex;gap:10px;align-items:flex-start;font-size:13px;color:var(--muted);line-height:1.45}
+.check input{width:20px;height:20px;flex:none;margin-top:1px;accent-color:var(--brand)}
+.check .linkbtn{font-size:13px;padding:0}
+.prose{display:flex;flex-direction:column;gap:10px;font-size:15px;line-height:1.55;max-width:65ch}
+code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12.5px;background:var(--surface-2);border-radius:8px;padding:8px 10px}
+.stack{display:flex;flex-direction:column;gap:12px}

@@ -60,7 +60,7 @@
   const OFF = 'https://world.openfoodfacts.org';
   const OFF_SEARCH = 'https://fr.openfoodfacts.org';
   const FIELDS = 'code,product_name,product_name_fr,generic_name_fr,brands,quantity,serving_size,serving_quantity,nutriments,nutriscore_grade,image_front_small_url,image_small_url,ingredients_text_fr,ingredients_text,ingredients_tags,additives_tags,labels_tags,ingredients_analysis_tags,traces_tags,allergens_tags';
-  const H = window.NS_HALAL;
+  const H = window.NS_ING;
 
   /* ================= Données ================= */
   const KEY = 'nutriscan.v2';
@@ -81,7 +81,7 @@
       exercises: Array.isArray(s.exercises) ? s.exercises.filter(x => x && x.date) : [],
       weights: Array.isArray(s.weights) ? s.weights.filter(w => w && w.date && w.kg > 0) : [],
       theme: ['auto', 'light', 'dark'].includes(s.theme) ? s.theme : 'auto',
-      halal: Object.assign({}, H.DEF, s.halal && typeof s.halal === 'object' ? s.halal : {})
+      warn: Object.assign({}, H.DEF, (s.warn && typeof s.warn === 'object') ? s.warn : (s.halal && typeof s.halal === 'object') ? s.halal : {})
     };
     for (const k of Object.keys(o.products)) {
       const p = o.products[k];
@@ -112,7 +112,35 @@
   let saveWarned = false;
   function save() {
     if (!store.set(KEY, S) && !saveWarned) { saveWarned = true; toast("Mémoire du navigateur pleine : exporte puis efface d'anciennes données"); }
+    schedulePush();
   }
+
+  /* ---------- Sauvegarde en ligne ---------- */
+  const C = window.NS_CLOUDAPI || { enabled: false, session: null };
+  const DEVICE = (() => { let d = store.get('nutriscan.device', null); if (!d) { d = 'd-' + uid(); store.set('nutriscan.device', d); } return d; })();
+  const SYNC = Object.assign({ lastPush: null, consentAt: null, pending: false, admin: false }, store.get('nutriscan.sync', {}));
+  const saveSync = () => store.set('nutriscan.sync', SYNC);
+  let syncState = 'idle', syncError = '', pushT = null, suppressPush = false;
+  function schedulePush() {
+    if (!C.enabled || !C.session || suppressPush) return;
+    SYNC.pending = true; saveSync();
+    clearTimeout(pushT); pushT = setTimeout(doPush, 2500);
+  }
+  async function doPush() {
+    if (!C.enabled || !C.session) return false;
+    clearTimeout(pushT);
+    syncState = 'saving'; refreshAccountStatus();
+    try {
+      SYNC.lastPush = await C.push(S, { device: DEVICE, consentAt: SYNC.consentAt });
+      SYNC.pending = false; saveSync(); syncState = 'idle'; syncError = '';
+      refreshAccountStatus(); return true;
+    } catch (e) {
+      syncState = e.offline ? 'offline' : 'error'; syncError = e.message || '';
+      if (e.status === 401) syncError = 'Session expirée : reconnecte-toi.';
+      refreshAccountStatus(); return false;
+    }
+  }
+  window.addEventListener('online', () => { if (SYNC.pending) doPush(); });
 
   /* ---------- Produits ---------- */
   const TMP = new Map();          // produits vus pendant la session (recherche, scan)
@@ -126,52 +154,53 @@
   const GEN_MAP = new Map(GEN.map(p => [p.key, p]));
   const getP = k => (k && (S.products[k] || GEN_MAP.get(k) || TMP.get(k))) || null;
 
-  /* ---------- Halal / végan / additifs ---------- */
+  /* ---------- Avertissements ingrédients / végan / additifs ---------- */
   let halalVersion = 0;
   const HCACHE = new WeakMap();
   function halalOf(p) {
-    const sig = halalVersion + '|' + (p.ing || '').length + '|' + (p.additives || []).length + '|' + (p.labels || []).length;
+    const sig = halalVersion + '|' + (p.ing || '').length + '|' + (p.additives || []).length + '|' + (p.allergens || []).length + '|' + (p.labels || []).length;
     const c = HCACHE.get(p);
     if (c && c.sig === sig) return c.res;
-    const res = H.analyze(p, S.halal);
+    const res = H.analyze(p, S.warn);
     HCACHE.set(p, { sig, res });
     return res;
   }
-  const RED_SHORT = { porc: 'Porc', alcool: 'Alcool', 'alcool-trace-vinaigre': 'Alcool', 'alcool-trace-vanille': 'Alcool', gelatine: 'Gélatine', sang: 'Sang' };
+  const SHORT = { porc: 'Porc', alcool: 'Alcool', 'alcool-trace-vinaigre': 'Alcool', 'alcool-trace-vanille': 'Alcool', vinaigre: 'Vinaigre', gelatine: 'Gélatine', sang: 'Sang',
+    'traces-porc': 'Traces de porc', 'traces-gelatine': 'Traces de gélatine', 'traces-alcool': 'Traces d’alcool', viande: 'Viande', insectes: 'Insectes', presure: 'Présure', 'adds-avoid': 'Additif à éviter', e542: 'Os d’animaux' };
+  const shortOf = r => SHORT[r.key] || (/^e\d/.test(r.key) ? 'E' + r.key.slice(1) : r.title);
   const VEG_LABEL = { vegan: 'Végan', vegetarian: 'Végétarien', 'maybe-veg': 'Végétarien ?', 'maybe-vegan': 'Végan ?', nonveg: 'Non végétarien' };
   function halalPill(p) {
-    if (!p || !S.halal.on || p.source === 'quick') return '';
+    if (!p || !S.warn.on || p.source === 'quick') return '';
     const h = halalOf(p);
-    if (h.status === 'red') { const r = h.reasons.find(x => x.level === 'red'); return '<span class="hp h-red">' + esc((r && RED_SHORT[r.key]) || 'Sensible') + '</span>'; }
-    if (h.status === 'orange') return '<span class="hp h-orange">À vérifier</span>';
-    if (h.status === 'cert') return '<span class="hp h-cert">Halal</span>';
-    return '';
+    const reds = h.reasons.filter(r => r.level === 'red');
+    const pick = reds.length ? reds : h.reasons.filter(r => r.cat === 'core' || r.cat === 'origin');
+    const labels = [...new Set(pick.map(shortOf))].slice(0, 2);
+    return labels.map(l => '<span class="hp h-' + (reds.length ? 'red' : 'orange') + '">' + esc(l) + '</span>').join('');
   }
   function halalCardHTML(p) {
     const h = halalOf(p);
     const vegChip = VEG_LABEL[h.veg] ? '<span class="hchip' + (h.veg === 'vegan' || h.veg === 'vegetarian' ? ' veg' : '') + '">' + VEG_LABEL[h.veg] + '</span>' : '';
-    if (!S.halal.on) return vegChip ? '<div class="h-chips">' + vegChip + '</div>' : '';
+    if (!S.warn.on) return vegChip ? '<div class="h-chips">' + vegChip + '</div>' : '';
     const reds = h.reasons.filter(r => r.level === 'red'), oranges = h.reasons.filter(r => r.level === 'orange');
     let icon = 'i-check', title = '', sub = '';
     if (h.status === 'red') {
       icon = 'i-alert';
-      title = 'Contient : ' + [...new Set(reds.map(r => RED_SHORT[r.key] || r.title))].join(', ').toLowerCase();
-      sub = oranges.length ? 'et ' + oranges.length + ' point' + (oranges.length > 1 ? 's' : '') + ' à vérifier' : 'Voir le détail ci-dessous';
+      title = 'Contient : ' + [...new Set(reds.map(shortOf))].join(', ').toLowerCase();
+      sub = oranges.length ? 'et ' + oranges.length + ' autre' + (oranges.length > 1 ? 's' : '') + ' avertissement' + (oranges.length > 1 ? 's' : '') : '1 avertissement important';
     } else if (h.status === 'orange') {
-      icon = 'i-alert'; title = 'À vérifier'; sub = oranges.length + ' point' + (oranges.length > 1 ? 's' : '') + ' à vérifier';
-    } else if (h.status === 'cert') {
-      title = 'Label halal'; sub = 'Le produit indique un label ou une mention halal.';
+      icon = 'i-alert'; title = oranges.length + ' avertissement' + (oranges.length > 1 ? 's' : '');
+      sub = 'Lis le détail avant d’acheter.';
     } else if (h.status === 'ok') {
-      title = 'Rien de sensible détecté'; sub = 'Ni porc, ni alcool, ni gélatine, ni viande dans les ingrédients.';
+      title = 'Aucun avertissement'; sub = 'Rien de sensible détecté dans les ingrédients.';
     } else {
       icon = 'i-help'; title = 'Ingrédients inconnus';
-      sub = p.source === 'custom' ? 'Aliment créé par toi : pas de liste d’ingrédients à vérifier.' : 'Open Food Facts n’a pas encore la liste d’ingrédients : regarde le paquet.';
+      sub = p.source === 'custom' ? 'Aliment créé par toi : pas de liste d’ingrédients.' : 'Open Food Facts n’a pas encore la liste d’ingrédients : regarde le paquet.';
     }
-    return '<section class="halal h-' + h.status + '" aria-label="Vérification halal">' +
+    return '<section class="halal h-' + h.status + '" aria-label="Avertissements">' +
       '<div class="h-top"><span class="h-ic">' + ic(icon) + '</span><div class="min0"><b>' + esc(title) + '</b><small>' + esc(sub) + '</small></div></div>' +
       (h.reasons.length ? '<ul class="h-list">' + h.reasons.map(r => '<li class="h-' + r.level + '"><i></i><b>' + esc(r.title) + '</b><span>' + esc(r.why) + '</span></li>').join('') + '</ul>' : '') +
-      ((vegChip || (h.certified && h.status !== 'cert')) ? '<div class="h-chips">' + vegChip + (h.certified && h.status !== 'cert' ? '<span class="hchip veg">Label halal</span>' : '') + '</div>' : '') +
-      (h.status === 'unknown' ? '' : '<p class="h-note">Vérification automatique d’après la liste d’ingrédients. Elle peut être incomplète : en cas de doute, fie-toi à l’emballage et au label.</p>') +
+      (vegChip ? '<div class="h-chips">' + vegChip + '</div>' : '') +
+      (h.status === 'unknown' ? '' : '<p class="h-note">Analyse automatique de la liste d’ingrédients (Open Food Facts). Elle peut être incomplète : vérifie toujours l’emballage.</p>') +
       '</section>';
   }
   const HAL_TAG = { u: ['orange', 'Origine animale possible'], i: ['orange', 'Insectes'], b: ['orange', 'Os d’animaux'], g: ['red', 'Souvent du porc'], a: ['red', 'Alcool'] };
@@ -179,7 +208,7 @@
   function addHTML(a) {
     const i = a.info, code = 'E' + a.code.slice(1);
     if (!i) return '<div class="add"><div class="add-top"><b>' + esc(code) + '</b><span>Additif non répertorié dans l’appli</span></div></div>';
-    const ht = S.halal.on ? HAL_TAG[i.halal] : null, he = HEALTH_TAG[i.level] || HEALTH_TAG[0];
+    const ht = S.warn.on ? HAL_TAG[i.halal] : null, he = HEALTH_TAG[i.level] || HEALTH_TAG[0];
     return '<div class="add"><div class="add-top"><b>' + esc(code) + '</b><span>' + esc(i.name) + '</span></div>' +
       '<div class="tags"><span class="tag">' + esc(i.role) + '</span><span class="tag">' + esc(i.origin) + '</span>' +
       (ht ? '<span class="tag t-' + ht[0] + '">' + ht[1] + '</span>' : '') + '<span class="tag t-' + he[0] + '">' + he[1] + '</span></div>' +
@@ -191,10 +220,6 @@
     let html = '';
     if (adds.length) html += '<section class="xcard"><div class="card-title"><h2>Additifs<span class="count">' + adds.length + '</span></h2></div><div class="adds">' + adds.map(addHTML).join('') + '</div></section>';
     else if (p.ing) html += '<p class="hint center">Aucun additif (E…) dans la liste d’ingrédients.</p>';
-    const al = H.allergenNames(p.allergens), tr = H.allergenNames(p.traces);
-    if (al.length || tr.length) html += '<div class="xcard allerg-card">' +
-      (al.length ? '<p class="allerg"><b>Allergènes :</b> ' + esc(al.join(', ')) + '</p>' : '') +
-      (tr.length ? '<p class="allerg"><b>Traces possibles :</b> ' + esc(tr.join(', ')) + '</p>' : '') + '</div>';
     if (p.ing) html += '<details class="xcard ing"' + (h.status === 'red' || h.status === 'orange' ? ' open' : '') + '><summary>Ingrédients</summary><p class="ing-text">' + H.highlight(p.ing, h.hits, esc) + '</p></details>';
     return html;
   }
@@ -205,9 +230,12 @@
     return data && data.status === 1 && data.product ? normalizeOff(data.product, code) : null;
   }
   function vibrateFor(p) {
-    if (!navigator.vibrate || !S.halal.on) return;
-    const st = halalOf(p).status;
-    try { if (st === 'red') navigator.vibrate([180, 90, 180, 90, 180]); else if (st === 'orange') navigator.vibrate([120, 80, 120]); } catch (e) { /* rien */ }
+    if (!navigator.vibrate || !S.warn.on) return;
+    const rs = halalOf(p).reasons;
+    try {
+      if (rs.some(r => r.level === 'red')) navigator.vibrate([180, 90, 180, 90, 180]);
+      else if (rs.some(r => r.cat === 'core' || r.cat === 'origin')) navigator.vibrate([120, 80, 120]);
+    } catch (e) { /* rien */ }
   }
 
   function unitOf(qty) { return /\d\s*(ml|cl|dl|l)\b/i.test(String(qty || '')) ? 'ml' : 'g'; }
@@ -1233,6 +1261,7 @@
         '<div class="kv"><span>Poids actuel</span><b>' + fkg(latestWeight()) + ' kg</b></div>' +
         (P.goal !== 'maintain' && P.goalWeight ? '<div class="kv"><span>Poids visé</span><b>' + fkg(P.goalWeight) + ' kg</b></div>' : '') +
         '<div class="kv"><span>Activité</span><b>' + esc(lvl ? lvl.label : '') + '</b></div></section>' : '') +
+      accountHTML() +
       halalSettingsHTML() +
       '<section class="card"><div class="card-title"><h2>Apparence</h2></div><div class="seg">' +
       [['auto', 'Automatique'], ['light', 'Clair'], ['dark', 'Sombre']].map(t => '<button data-act="theme" data-t="' + t[0] + '"' + (S.theme === t[0] ? ' class="on"' : '') + '>' + t[1] + '</button>').join('') + '</div></section>' +
@@ -1244,16 +1273,182 @@
       '<button class="danger" data-act="wipe" data-confirm="Appuie encore : tout sera effacé">' + ic('i-trash') + '<span class="grow">Effacer toutes mes données</span></button></div></section>' +
       '<p class="credit">NutriScan 2.0 · Tes données restent sur ce téléphone.<br>Produits : <a href="https://world.openfoodfacts.org" target="_blank" rel="noopener">Open Food Facts</a> (licence ODbL)</p>';
   }
+  /* ================= Compte ================= */
+  function syncText() {
+    if (syncState === 'saving') return 'Sauvegarde en cours…';
+    if (syncState === 'offline') return 'Hors ligne : sauvegarde dès le retour du réseau.';
+    if (syncState === 'error') return 'Erreur de sauvegarde : ' + syncError;
+    if (SYNC.pending) return 'Modifications en attente de sauvegarde…';
+    if (SYNC.lastPush) {
+      const d = new Date(SYNC.lastPush), t = today();
+      const day0 = ymd(d) === t ? 'aujourd’hui' : ymd(d) === addDays(t, -1) ? 'hier' : 'le ' + d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' });
+      return 'Sauvegardé ' + day0 + ' à ' + d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+    }
+    return 'Pas encore sauvegardé';
+  }
+  function refreshAccountStatus() { const el = $('#acctStatus'); if (el) { el.textContent = syncText(); el.className = 'hint' + (syncState === 'error' ? ' err' : ''); } }
+  function accountHTML() {
+    if (!C.enabled) return '';
+    const u = C.session && C.session.user;
+    if (!u) return '<section class="card"><div class="card-title"><h2>Compte</h2></div>' +
+      '<p class="hint" style="margin-bottom:12px">Crée un compte gratuit pour sauvegarder tes données en ligne et les retrouver si tu changes de téléphone.</p>' +
+      '<div class="row-btns"><button class="btn primary" data-act="auth" data-m="signup">Créer un compte</button><button class="btn outline" data-act="auth" data-m="login">Se connecter</button></div></section>';
+    return '<section class="card"><div class="card-title"><h2>Compte</h2>' + (SYNC.admin ? '<a class="linkbtn" href="admin.html">Panneau admin</a>' : '') + '</div>' +
+      '<div class="kv"><span>E-mail</span><b>' + esc(u.email || '') + '</b></div>' +
+      '<p class="hint" id="acctStatus" style="margin:4px 0 12px">' + esc(syncText()) + '</p>' +
+      '<div class="menu">' +
+      '<button data-act="syncNow">' + ic('i-upload') + '<span class="grow">Sauvegarder maintenant</span></button>' +
+      '<button data-act="syncPull">' + ic('i-download') + '<span class="grow">Récupérer ma sauvegarde en ligne</span></button>' +
+      '<button data-act="newPassword">' + ic('i-edit') + '<span class="grow">Changer de mot de passe</span></button>' +
+      '<button data-act="privacy">' + ic('i-help') + '<span class="grow">Confidentialité</span></button>' +
+      '<button data-act="logout">' + ic('i-left') + '<span class="grow">Se déconnecter</span></button>' +
+      '<button class="danger" data-act="deleteAccount" data-confirm="Appuie encore : compte et sauvegarde supprimés">' + ic('i-trash') + '<span class="grow">Supprimer mon compte</span></button>' +
+      '</div></section>';
+  }
+  const PRIVACY = '<p>Quand tu crées un compte, NutriScan enregistre en ligne (base Supabase, hébergée en Europe) : ton e-mail et toutes les données de l’appli (repas, aliments, poids, eau, activités, objectifs, réglages, y compris tes réglages d’avertissements).</p>' +
+    '<p>But : sauvegarder ton compte et le restaurer si tu perds ton téléphone ou tes données.</p>' +
+    '<p>Qui peut les voir : toi, et l’administrateur de l’appli, uniquement pour gérer les sauvegardes et restaurer un compte. Elles ne sont ni vendues ni partagées.</p>' +
+    '<p>Tes droits : tu peux télécharger tes données (Profil → Sauvegarder mes données) et supprimer ton compte à tout moment (Profil → Supprimer mon compte). La suppression efface aussi toutes les versions sauvegardées.</p>' +
+    '<p>Sans compte, tout reste uniquement sur ton téléphone.</p>';
+  function openPrivacy(swap) {
+    const el = mountSheet(head('Confidentialité') + '<div class="prose">' + PRIVACY + '</div>');
+    openLayer({ el }, swap);
+  }
+  function openAuth(mode) {
+    const signup = mode === 'signup';
+    const el = mountSheet(head(signup ? 'Créer un compte' : 'Se connecter') +
+      '<form id="authForm" class="stack" autocomplete="on" novalidate>' +
+      '<div class="field"><label for="aEmail">E-mail</label><input id="aEmail" type="email" inputmode="email" autocomplete="email" placeholder="toi@exemple.com" required></div>' +
+      '<div class="field"><label for="aPass">Mot de passe</label><input id="aPass" type="password" autocomplete="' + (signup ? 'new-password' : 'current-password') + '" placeholder="' + (signup ? '8 caractères minimum' : '') + '" required></div>' +
+      (signup ? '<label class="check"><input type="checkbox" id="aConsent"><span>J’accepte que mes données NutriScan (repas, poids, objectifs, réglages) soient sauvegardées en ligne et consultables par l’administrateur de l’appli pour pouvoir restaurer mon compte. Je peux supprimer mon compte à tout moment. <button type="button" class="linkbtn" data-act="privacyPush">En savoir plus</button></span></label>' : '') +
+      '<p class="hint err" id="aErr" hidden></p>' +
+      '<button class="btn primary" type="submit" id="aSubmit">' + (signup ? 'Créer mon compte' : 'Se connecter') + '</button>' +
+      (signup ? '<button type="button" class="linkbtn" data-am="login">Déjà un compte ? Se connecter</button>' :
+        '<div class="row-btns"><button type="button" class="linkbtn" data-am="signup">Créer un compte</button><button type="button" class="linkbtn" data-am="forgot">Mot de passe oublié ?</button></div>') +
+      '</form>');
+    openLayer({ el }, mode && mode.swap);
+    const f = $('#authForm', el), err = $('#aErr', el), btn = $('#aSubmit', el);
+    const showErr = m => { err.textContent = m; err.hidden = !m; };
+    el.addEventListener('click', ev => {
+      const b = ev.target.closest('[data-am]'); if (!b) return;
+      if (b.dataset.am === 'forgot') {
+        const email = $('#aEmail', el).value.trim();
+        if (!/^\S+@\S+\.\S+$/.test(email)) { showErr('Tape ton e-mail au-dessus, puis touche « Mot de passe oublié ? ».'); return; }
+        C.recover(email, location.origin + location.pathname).then(() => { showErr(''); toast('E-mail envoyé : ouvre le lien pour choisir un nouveau mot de passe'); }).catch(e => showErr(e.message));
+        return;
+      }
+      closeTop(); setTimeout(() => openAuth(b.dataset.am), 60);
+    });
+    f.addEventListener('submit', async ev => {
+      ev.preventDefault();
+      const email = $('#aEmail', el).value.trim(), pass = $('#aPass', el).value;
+      if (!/^\S+@\S+\.\S+$/.test(email)) { showErr('Adresse e-mail invalide.'); return; }
+      if (signup && pass.length < 8) { showErr('Choisis un mot de passe d’au moins 8 caractères.'); return; }
+      if (!pass) { showErr('Tape ton mot de passe.'); return; }
+      if (signup && !$('#aConsent', el).checked) { showErr('Coche la case pour accepter la sauvegarde en ligne.'); return; }
+      btn.disabled = true; showErr('');
+      try {
+        if (signup) {
+          SYNC.consentAt = new Date().toISOString(); saveSync();
+          const ok = await C.signUp(email, pass, { name: (S.profile && S.profile.name) || '' });
+          if (!ok) { $('.sheet-in', el).innerHTML = head('Vérifie tes e-mails') + '<div class="msg">On t’a envoyé un e-mail à <b>' + esc(email) + '</b>. Ouvre le lien pour activer ton compte : tu seras connecté automatiquement.</div><button class="btn primary" data-act="close">OK</button>'; return; }
+        } else await C.signIn(email, pass);
+        closeTop();
+        await afterLogin();
+      } catch (e) { showErr(e.message); btn.disabled = false; }
+    });
+    setTimeout(() => { const i = $('#aEmail', el); if (i && el.isConnected) i.focus(); }, 320);
+  }
+  function openNewPassword() {
+    const el = mountSheet(head('Nouveau mot de passe') +
+      '<form id="npForm" class="stack"><div class="field"><label for="npPass">Nouveau mot de passe</label><input id="npPass" type="password" autocomplete="new-password" placeholder="8 caractères minimum"></div>' +
+      '<p class="hint err" id="npErr" hidden></p><button class="btn primary" type="submit">Enregistrer</button></form>');
+    openLayer({ el });
+    $('#npForm', el).addEventListener('submit', async ev => {
+      ev.preventDefault();
+      const pw = $('#npPass', el).value, er = $('#npErr', el);
+      if (pw.length < 8) { er.textContent = 'Au moins 8 caractères.'; er.hidden = false; return; }
+      try { await C.updatePassword(pw); closeTop(); toast('Mot de passe modifié'); } catch (e) { er.textContent = e.message; er.hidden = false; }
+    });
+  }
+  async function checkAdmin() {
+    try { const rows = await C.req('/rest/v1/admins?select=user_id&user_id=eq.' + C.session.user.id, { auth: true }); SYNC.admin = !!(rows && rows.length); }
+    catch (e) { SYNC.admin = false; }
+    saveSync(); if (tab === 'profile') renderProfile();
+  }
+  function mergeStates(a, b) {
+    const by = (x, y, k) => { const m = new Map(); (y || []).forEach(e => m.set(e[k], e)); (x || []).forEach(e => m.set(e[k], e)); return [...m.values()]; };
+    const o = fixState(a);
+    o.entries = by(a.entries, b.entries, 'id');
+    o.exercises = by(a.exercises, b.exercises, 'id');
+    o.weights = by(a.weights, b.weights, 'date').sort((x, y) => x.date < y.date ? -1 : 1);
+    o.water = Object.assign({}, b.water);
+    Object.keys(a.water || {}).forEach(d => { o.water[d] = Math.max(num(a.water[d]), num(b.water[d])); });
+    o.products = Object.assign({}, b.products, a.products);
+    o.recents = [...new Set((a.recents || []).concat(b.recents || []))].slice(0, 40);
+    o.favorites = [...new Set((a.favorites || []).concat(b.favorites || []))];
+    if (!a.profile && b.profile) { o.profile = b.profile; o.goals = b.goals; }
+    o.skipSetup = !!(a.skipSetup || b.skipSetup);
+    return fixState(o);
+  }
+  function applyRemote(data, merge) {
+    suppressPush = true;
+    S = merge ? mergeStates(S, fixState(data)) : fixState(data);
+    halalVersion++; save(); suppressPush = false;
+    applyTheme(); renderAll();
+    if (OB && (S.profile || S.skipSetup)) closeOB();
+    doPush();
+  }
+  function offerRemote(r, fromLogin) {
+    const d = new Date(r.updated_at);
+    const n = (r.data && Array.isArray(r.data.entries)) ? r.data.entries.length : 0;
+    const when = d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }) + ' à ' + d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+    const title = r.device === 'admin' ? 'Ton compte a été restauré' : fromLogin ? 'Une sauvegarde existe déjà' : 'Sauvegarde plus récente trouvée';
+    actionSheet(title, [
+      { label: 'Récupérer la sauvegarde en ligne', sub: 'Du ' + when + ' · ' + n + ' aliment' + (n > 1 ? 's' : '') + ' · remplace ce téléphone', icon: 'i-download', color: 'var(--brand)', run: () => { applyRemote(r.data); toast('Sauvegarde récupérée'); } },
+      { label: 'Fusionner les deux', sub: 'Garde tout ce qui est sur ce téléphone et en ligne', icon: 'i-copy', color: 'var(--water)', run: () => { applyRemote(r.data, true); toast('Données fusionnées'); } },
+      { label: 'Garder ce téléphone', sub: 'Remplace la sauvegarde en ligne par ce téléphone', icon: 'i-upload', color: 'var(--muted)', run: () => { doPush().then(ok => ok && toast('Sauvegarde en ligne mise à jour')); } }
+    ]);
+  }
+  async function afterLogin() {
+    let r = null;
+    try { r = await C.pull(); } catch (e) { toast(e.message); }
+    const localHas = S.entries.length > 0 || !!S.profile;
+    if (!r) { const ok = await doPush(); toast(ok ? 'Compte prêt : tes données sont sauvegardées en ligne' : 'Connecté'); }
+    else if (!localHas) { applyRemote(r.data); toast('Connecté : ta sauvegarde a été récupérée'); }
+    else offerRemote(r, true);
+    renderAll();
+    checkAdmin();
+  }
+  async function cloudStart() {
+    if (!C.enabled) return;
+    const link = await C.fromLink();
+    if (link && link.error) toast(link.error);
+    else if (link && link.type === 'recovery') { renderAll(); openNewPassword(); return; }
+    else if (link) { toast('Adresse confirmée : tu es connecté'); await afterLogin(); return; }
+    if (!C.session) return;
+    if (SYNC.pending) doPush();
+    try {
+      const r = await C.pull();
+      if (r && r.device !== DEVICE && (!SYNC.lastPush || new Date(r.updated_at) > new Date(SYNC.lastPush))) { if (!layers.length) offerRemote(r); }
+      else if (!r) doPush();
+    } catch (e) { /* hors ligne */ }
+    checkAdmin();
+  }
+
   function halalSettingsHTML() {
-    const hs = S.halal;
+    const hs = S.warn;
     const seg = (k, opts) => '<div class="seg">' + opts.map(o => '<button data-act="halalSet" data-k="' + k + '" data-v="' + o[0] + '"' + (String(hs[k]) === o[0] ? ' class="on"' : '') + '>' + o[1] + '</button>').join('') + '</div>';
-    const lv = [['red', 'Rouge'], ['orange', 'Orange'], ['off', 'Ignorer']];
-    return '<section class="card"><div class="card-title"><h2>Halal et ingrédients</h2></div>' +
-      '<div class="setrow"><span>Vérification halal au scan</span>' + seg('on', [['true', 'Activée'], ['false', 'Désactivée']]) + '</div>' +
-      (hs.on ? '<div class="setrow"><span>Viande sans label halal</span>' + seg('meat', lv) + '</div>' +
+    const lv = [['red', 'Rouge'], ['orange', 'Orange'], ['off', 'Masquer']];
+    const show = [['on', 'Afficher'], ['off', 'Masquer']];
+    return '<section class="card"><div class="card-title"><h2>Avertissements</h2></div>' +
+      '<div class="setrow"><span>Avertissements sur les produits</span>' + seg('on', [['true', 'Activés'], ['false', 'Désactivés']]) + '</div>' +
+      (hs.on ? '<div class="setrow"><span>Viande (abattage non précisé)</span>' + seg('meat', lv) + '</div>' +
         '<div class="setrow"><span>Alcool en trace (vinaigre de vin, extrait de vanille…)</span>' + seg('alcohol', lv) + '</div>' +
-        '<div class="setrow"><span>Origine animale possible (E471, présure, glycérine…)</span>' + seg('unc', [['orange', 'Orange'], ['off', 'Ignorer']]) + '</div>' +
-        '<p class="hint">Porc, gélatine, sang et boissons alcoolisées sont toujours signalés en rouge. Le statut végan / végétarien s’affiche sur chaque produit.</p>' : '') +
+        '<div class="setrow"><span>Origine animale possible (E471, présure, carmin…)</span>' + seg('unc', [['orange', 'Orange'], ['off', 'Masquer']]) + '</div>' +
+        '<div class="setrow"><span>Additifs controversés, huile de palme, édulcorants</span>' + seg('adds', show) + '</div>' +
+        '<div class="setrow"><span>Allergènes</span>' + seg('allerg', show) + '</div>' +
+        '<p class="hint">Porc, gélatine, sang et boissons alcoolisées sont toujours signalés en rouge.</p>' : '') +
       '</section>';
   }
   function openFoodList(kind) {
@@ -1286,7 +1481,7 @@
       try {
         const data = JSON.parse(r.result);
         if (!data || !Array.isArray(data.entries)) throw new Error('format');
-        S = fixState(data); save(); applyTheme(); renderAll(); toast('Sauvegarde restaurée (' + S.entries.length + ' aliments)');
+        S = fixState(data); halalVersion++; save(); applyTheme(); renderAll(); toast('Sauvegarde restaurée (' + S.entries.length + ' aliments)');
       } catch (e) { toast('Ce fichier n’est pas une sauvegarde NutriScan'); }
     };
     r.readAsText(f);
@@ -1480,15 +1675,26 @@
     theme: b => { S.theme = b.dataset.t; save(); applyTheme(); renderProfile(); },
     halalSet: b => {
       const k = b.dataset.k, v = b.dataset.v;
-      S.halal[k] = k === 'on' ? v === 'true' : v;
+      S.warn[k] = k === 'on' ? v === 'true' : v;
       halalVersion++; save(); renderAll();
     },
     myFoods: () => openFoodList('mine'),
     favList: () => openFoodList('fav'),
     exportData: () => exportData(),
     importData: () => $('#importFile').click(),
+    auth: b => openAuth(b.dataset.m),
+    privacy: () => openPrivacy(),
+    privacyPush: () => openPrivacy(),
+    syncNow: () => { doPush().then(ok => toast(ok ? 'Sauvegardé en ligne' : (syncError || 'Sauvegarde impossible pour l’instant'))); },
+    syncPull: async () => { try { const r = await C.pull(); if (r) offerRemote(r); else toast('Aucune sauvegarde en ligne pour l’instant'); } catch (e) { toast(e.message); } },
+    newPassword: () => openNewPassword(),
+    logout: async () => { await C.signOut(); SYNC.admin = false; SYNC.pending = false; saveSync(); renderAll(); toast('Déconnecté : tes données restent sur ce téléphone'); },
+    deleteAccount: async () => {
+      try { await C.deleteAccount(); SYNC.lastPush = null; SYNC.admin = false; SYNC.pending = false; SYNC.consentAt = null; saveSync(); renderAll(); toast('Compte et sauvegarde en ligne supprimés'); }
+      catch (e) { toast(e.message); }
+    },
     wipe: () => {
-      const theme = S.theme, halal = S.halal; S = fixState({ theme, halal }); save(); TMP.clear(); setDay(today()); switchTab('journal'); toast('Toutes les données ont été effacées'); openOnboarding(false);
+      const theme = S.theme, warn = S.warn; S = fixState({ theme, warn }); save(); TMP.clear(); setDay(today()); switchTab('journal'); toast('Toutes les données ont été effacées'); openOnboarding(false);
     },
     afMealPick: () => {
       if (!AF) return;
@@ -1549,7 +1755,8 @@
   try { if (history.state && history.state.nsLayer) history.replaceState(null, ''); } catch (e) { /* rien */ }
   applyTheme();
   renderAll();
-  if (!S.profile && !S.skipSetup) openOnboarding(false);
+  if (!S.profile && !S.skipSetup && !/access_token=/.test(location.hash)) openOnboarding(false);
+  cloudStart();
   if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
   setTimeout(() => { loadScanLib().catch(() => {}); }, 2000);
 
