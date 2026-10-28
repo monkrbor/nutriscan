@@ -16,7 +16,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=Figtree:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="styles.css?v=2.2">
+<link rel="stylesheet" href="styles.css?v=2.3">
 </head>
 <body>
 
@@ -102,7 +102,7 @@
 <div class="scrim" id="scrim"></div>
 
 <div class="scanner" id="scanner" hidden role="dialog" aria-modal="true" aria-label="Scanner un code-barres">
-  <div id="reader"></div>
+  <div class="cam"><div id="reader"></div></div>
   <div class="scan-ui">
     <div class="scan-top">
       <button class="sbtn" data-act="close" aria-label="Fermer"><svg class="ic"><use href="#i-x"/></svg></button>
@@ -114,6 +114,7 @@
     <p class="scan-msg" id="scMsg">Place le code-barres dans le cadre</p>
     <div class="scan-bottom">
       <button class="spill" id="scZoom" data-act="scZoom" hidden>Zoom ×2</button>
+      <button class="spill big" id="scTap" data-act="scTap" hidden>Toucher pour afficher la caméra</button>
       <button class="spill" data-act="scManual"><svg class="ic sm"><use href="#i-keyboard"/></svg>Taper le code</button>
     </div>
     <form class="scan-manual" id="scManualForm" hidden autocomplete="off">
@@ -127,11 +128,11 @@
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 <input type="file" id="importFile" accept="application/json,.json" hidden>
 
-<script src="foods.js?v=2.2"></script>
-<script src="additives.js?v=2.2"></script>
-<script src="config.js?v=2.2"></script>
-<script src="cloud.js?v=2.2"></script>
-<script src="ingredients.js?v=2.2"></script>
-<script src="app.js?v=2.2"></script>
+<script src="foods.js?v=2.3"></script>
+<script src="additives.js?v=2.3"></script>
+<script src="config.js?v=2.3"></script>
+<script src="cloud.js?v=2.3"></script>
+<script src="ingredients.js?v=2.3"></script>
+<script src="app.js?v=2.3"></script>
 </body>
 </html>
