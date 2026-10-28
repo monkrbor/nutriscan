@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex,nofollow">
+<title>NutriScan Admin</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=Figtree:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css?v=2.2">
+<style>
+  /* Layout : page d'administration — en-tête, chiffres clés, liste des comptes, panneau de détail à droite (en bas sur mobile) */
+  body{min-height:100vh}
+  .adm{max-width:1100px;margin:0 auto;padding-block:calc(env(safe-area-inset-top,0px) + 18px) 40px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));display:flex;flex-direction:column;gap:16px}
+  .adm-head{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+  .adm-brand{display:flex;align-items:center;gap:12px}
+  .adm-brand .logo{width:44px;height:44px;border-radius:14px;background:linear-gradient(155deg,var(--hero-a),var(--hero-b));display:grid;place-items:center;color:#fff}
+  .adm-brand h1{font:800 24px/1.1 var(--display);letter-spacing:-.02em}
+  .adm-brand p{font-size:13px;color:var(--muted)}
+  .login{max-width:420px;width:100%;margin:40px auto 0;display:flex;flex-direction:column;gap:12px}
+  .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}
+  .stat{background:var(--surface);border-radius:18px;box-shadow:var(--shadow);padding:14px}
+  .stat b{display:block;font:800 28px/1.1 var(--display);letter-spacing:-.02em}
+  .stat span{font-size:13px;color:var(--muted);font-weight:600}
+  .grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.1fr);gap:16px;align-items:start}
+  @media (max-width:860px){.grid{grid-template-columns:1fr}}
+  .users{background:var(--surface);border-radius:18px;box-shadow:var(--shadow);overflow:hidden}
+  .users .searchbox{margin:12px;border-radius:14px}
+  .u{display:grid;grid-template-columns:40px minmax(0,1fr) auto;gap:12px;align-items:center;width:100%;border:0;border-top:1px solid var(--line);background:none;text-align:left;padding:11px 14px}
+  .u:hover,.u.on{background:var(--surface-2)}
+  .u .av{width:40px;height:40px;border-radius:50%;background:var(--brand-soft);color:var(--brand-text);display:grid;place-items:center;font:800 16px/1 var(--display)}
+  .u b{display:block;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .u small{display:block;color:var(--muted);font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .u .when{font-size:12px;color:var(--muted);text-align:right}
+  .detail{background:var(--surface);border-radius:18px;box-shadow:var(--shadow);padding:16px;display:flex;flex-direction:column;gap:14px;position:sticky;top:16px}
+  .detail h2{font:800 22px/1.2 var(--display);letter-spacing:-.02em;overflow-wrap:anywhere}
+  .mini{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:8px}
+  .mini div{background:var(--surface-2);border-radius:14px;padding:10px}
+  .mini b{display:block;font:800 18px/1.2 var(--display)}
+  .mini span{font-size:12px;color:var(--muted);font-weight:600}
+  .sec h3{font:800 15px/1.2 var(--display);margin-bottom:6px}
+  .tbl{overflow-x:auto}
+  .tbl table{width:100%;border-collapse:collapse;font-size:13px}
+  .tbl th,.tbl td{text-align:left;padding:7px 6px;border-top:1px solid var(--line);white-space:nowrap}
+  .tbl th{color:var(--muted);font-weight:700;border-top:0}
+  .tbl td.num,.tbl th.num{text-align:right}
+  .acts{display:flex;gap:8px;flex-wrap:wrap}
+  .acts .btn{min-height:44px;font-size:14px;flex:1 1 auto}
+  .ver{display:flex;align-items:center;gap:10px;padding:8px 0;border-top:1px solid var(--line);font-size:14px}
+  .ver:first-child{border-top:0}
+  .ver span{flex:1}
+  .ver .btn{min-height:36px;font-size:13px;padding:0 12px;border-radius:12px}
+  .empty-d{color:var(--muted);text-align:center;padding:30px 10px}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-scan" viewBox="0 0 24 24"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2M7 8v8M10 8v8M13.5 8v8M17 8v8"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></symbol>
+  <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></symbol>
+  <symbol id="i-upload" viewBox="0 0 24 24"><path d="M12 16V5M7 10l5-5 5 5M5 20h14"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7"/></symbol>
+</svg>
+<div class="adm">
+  <header class="adm-head">
+    <div class="adm-brand"><span class="logo"><svg class="ic"><use href="#i-scan"/></svg></span><div><h1>NutriScan Admin</h1><p id="who">Sauvegardes des comptes</p></div></div>
+    <div class="acts" id="topActs" hidden>
+      <button class="btn outline" id="reload"><svg class="ic sm"><use href="#i-refresh"/></svg>Actualiser</button>
+      <button class="btn outline" id="logout">Se déconnecter</button>
+    </div>
+  </header>
+
+  <form class="card login" id="login" hidden autocomplete="on">
+    <h2 style="font:800 20px/1.2 var(--display)">Connexion administrateur</h2>
+    <div class="field"><label for="lEmail">E-mail</label><input id="lEmail" type="email" autocomplete="email"></div>
+    <div class="field"><label for="lPass">Mot de passe</label><input id="lPass" type="password" autocomplete="current-password"></div>
+    <p class="hint err" id="lErr" hidden></p>
+    <button class="btn primary" type="submit">Se connecter</button>
+  </form>
+
+  <div class="msg" id="notice" hidden></div>
+
+  <section id="panel" hidden style="display:flex;flex-direction:column;gap:16px">
+    <div class="stats" id="stats"></div>
+    <div class="grid">
+      <div class="users">
+        <div class="searchbox"><svg class="ic sm"><use href="#i-search"/></svg><input id="q" type="search" placeholder="Nom ou e-mail" autocomplete="off" aria-label="Rechercher un compte"></div>
+        <div id="list"></div>
+      </div>
+      <aside class="detail" id="detail"><p class="empty-d">Choisis un compte pour voir sa sauvegarde.</p></aside>
+    </div>
+  </section>
+</div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+<input type="file" id="fileIn" accept="application/json,.json" hidden>
+<script src="config.js?v=2.2"></script>
+<script src="cloud.js?v=2.2"></script>
+<script src="admin.js?v=2.2"></script>
+</body>
+</html>

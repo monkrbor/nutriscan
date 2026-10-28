@@ -13,15 +13,26 @@ Appli en ligne : **https://monkrbor.github.io/nutriscan/**
 - **Récents, favoris, mes aliments**, ajout en un clic avec le bouton +
 - **Ajout rapide** (juste les calories), **création d'aliments** (un code-barres inconnu est reconnu ensuite)
 - **Reprendre le repas d'hier**, vider un repas, modifier ou supprimer chaque aliment
-- **Vérification halal au scan** : porc, gélatine, alcool (même en trace : vinaigre de vin, extrait de vanille…), sang en rouge ; viande sans label et origine animale possible (E471, présure…) en orange. L'appli dit ce que contient le produit, sans verdict religieux. Réglable dans Profil
+- **Avertissements au scan** (sans aucun verdict) : en rouge ce que le produit contient (porc, gélatine, alcool même en trace comme le vinaigre de vin ou l'extrait de vanille, sang, additif à éviter) ; en orange ce qui est à vérifier (viande dont l'abattage n'est pas précisé, origine animale possible comme E471 ou présure, additifs à limiter, huile de palme, édulcorants, allergènes, traces). Réglables dans Profil
 - **Végan / végétarien** sur chaque produit
-- **Détail de chaque additif E** (≈ 250 additifs) : nom, rôle, origine, point halal, info santé ; ingrédients surlignés ; allergènes
+- **Détail de chaque additif E** (≈ 250 additifs) : nom, rôle, origine, info santé ; ingrédients surlignés
+- **Comptes et sauvegarde en ligne** (Supabase) avec consentement, sauvegarde automatique, récupération sur un autre téléphone, suppression du compte
+- **Page admin** (`admin.html`) : liste des comptes, détail, téléchargement, versions précédentes, restauration
 - **Eau** (verres de 250 ml), **activités** (calories brûlées estimées, ajoutées au budget), **poids**
 - **Progrès** : calories sur 7 ou 30 jours, macros moyennes, courbe de poids, IMC, régularité
 - **Profil** : objectifs modifiables, thème clair / sombre / automatique, sauvegarde et restauration des données
 - Fonctionne hors ligne une fois installée ; le bouton retour d'Android ferme les fenêtres
 
-Les données restent sur le téléphone (stockage du navigateur). Pense à faire une sauvegarde depuis Profil si tu changes de téléphone.
+Sans compte, les données restent sur le téléphone. Avec un compte, elles sont aussi sauvegardées en ligne.
+
+## Activer les comptes (Supabase)
+
+1. Crée un projet sur https://supabase.com (gratuit).
+2. SQL Editor → colle le contenu de `supabase.sql` → Run.
+3. Authentication → Sign In / Providers → Email : désactive « Confirm email » (ou règle l'URL du site sur l'adresse de l'appli).
+4. Mets le Project URL et la clé publique (anon / publishable) dans `config.js`.
+5. Crée ton compte dans l'appli, puis lance dans le SQL Editor la ligne `insert into public.admins …` (fin de `supabase.sql`) avec ton e-mail.
+6. Ouvre `admin.html`.
 
 ## Installer sur le téléphone
 
@@ -36,8 +47,12 @@ Les données restent sur le téléphone (stockage du navigateur). Pense à faire
 | `styles.css` | Design (thème clair et sombre) |
 | `app.js` | Toute la logique |
 | `foods.js` | Aliments courants (valeurs moyennes pour 100 g) |
-| `additives.js` | Base des additifs E (rôle, origine, halal, santé) |
-| `halal.js` | Analyse halal, végan / végétarien, surlignage des ingrédients |
+| `additives.js` | Base des additifs E (rôle, origine, santé) |
+| `ingredients.js` | Avertissements, végan / végétarien, allergènes, surlignage des ingrédients |
+| `config.js` | Adresse et clé publique Supabase |
+| `cloud.js` | Comptes et sauvegarde en ligne |
+| `admin.html`, `admin.js` | Page d'administration des sauvegardes |
+| `supabase.sql` | Tables et règles de sécurité à créer dans Supabase |
 | `sw.js` | Mode hors ligne |
 | `manifest.webmanifest`, icônes | Installation sur l'écran d'accueil |
 
