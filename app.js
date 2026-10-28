@@ -884,7 +884,7 @@
     el.hidden = false; requestAnimationFrame(() => el.classList.add('show'));
     $('#scManualForm').hidden = true; $('#scCode').value = '';
     $('#scFrame').classList.remove('ok');
-    $('#scTorch').hidden = true; $('#scTorchSpacer').hidden = false; $('#scZoom').hidden = true;
+    $('#scTorch').hidden = true; $('#scTap').hidden = true; $('#scTorchSpacer').hidden = false; $('#scZoom').hidden = true;
     $('#scTorch').classList.remove('on'); $('#scZoom').classList.remove('on');
     SC.torch = false; SC.zoom = false;
     openLayer({ el, kind: 'scanner', persistent: true, onClose: () => {
@@ -916,6 +916,8 @@
       SC.starting = false;
       if (!scannerOpen()) { stopScan(); return; }
       setupCamFeatures();
+      fixVideo();
+      setTimeout(checkVideo, 1600);
     } catch (e) {
       SC.starting = false; SC.running = false;
       const m = String((e && (e.name || e.message)) || e);
@@ -934,6 +936,22 @@
     $('#scTorch').hidden = !SC.torchF; $('#scTorchSpacer').hidden = !!SC.torchF;
     $('#scZoom').hidden = !(SC.zoomF && SC.zoomF.max() >= 1.8);
     try { const r = SC.inst.applyVideoConstraints({ advanced: [{ focusMode: 'continuous' }] }); if (r && r.catch) r.catch(() => {}); } catch (e) { /* pas d'autofocus réglable */ }
+  }
+  // iPhone : la vidéo doit être « inline », muette, et parfois relancée par un toucher
+  function fixVideo() {
+    const v = $('#reader video'); if (!v) return null;
+    v.setAttribute('playsinline', ''); v.setAttribute('webkit-playsinline', ''); v.setAttribute('muted', ''); v.setAttribute('autoplay', '');
+    v.muted = true; v.playsInline = true;
+    try { const pr = v.play(); if (pr && pr.catch) pr.catch(() => {}); } catch (e) { /* rien */ }
+    return v;
+  }
+  function checkVideo() {
+    if (!scannerOpen() || !SC.running) return;
+    const v = $('#reader video');
+    const box = v && v.getBoundingClientRect();
+    const black = !v || v.paused || !v.videoWidth || !box || box.height < 50;
+    $('#scTap').hidden = !black;
+    if (black) scanMsg('La caméra ne s’affiche pas ? Touche le bouton ci-dessous.', false);
   }
   async function stopScan() {
     SC.running = false;
@@ -1720,7 +1738,17 @@
       if (!SC.zoomF) return;
       try { const z = !SC.zoom; await SC.zoomF.apply(z ? Math.min(2, SC.zoomF.max()) : SC.zoomF.min()); SC.zoom = z; b.classList.toggle('on', z); } catch (e) { toast('Zoom indisponible'); }
     },
-    scManual: () => { showManual(); setTimeout(() => $('#scCode').focus(), 50); }
+    scManual: () => { showManual(); setTimeout(() => $('#scCode').focus(), 50); },
+    scTap: async () => {
+      const v = fixVideo();
+      if (v) { try { await v.play(); } catch (e) { /* rien */ } }
+      setTimeout(() => {
+        const ok = v && !v.paused && v.videoWidth > 0;
+        $('#scTap').hidden = !!ok;
+        if (ok) scanMsg('Place le code-barres dans le cadre');
+        else { scanMsg('La caméra reste noire : ferme et rouvre le scanner, ou ouvre l’appli dans Safari / Chrome.', true); stopScan().then(() => startScan()); }
+      }, 400);
+    }
   };
 
   document.addEventListener('click', e => {

@@ -95,6 +95,11 @@
     const rows = await req('/rest/v1/backups?select=data,updated_at,device&user_id=eq.' + s.user.id, { auth: true });
     return rows && rows[0] ? rows[0] : null;
   }
+  async function meta() {
+    const s = await ensure(); if (!s) return null;
+    const rows = await req('/rest/v1/backups?select=updated_at,device&user_id=eq.' + s.user.id, { auth: true });
+    return rows && rows[0] ? rows[0] : null;
+  }
   async function push(state, meta) {
     const s = await ensure(); if (!s) throw new Error('Pas connecté');
     meta = meta || {};
