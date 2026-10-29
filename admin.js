@@ -45,8 +45,11 @@
   const eventsOf = id => events.filter(e => e.user_id === id || (!e.user_id && owner[e.device] === id));
   function device(ua) {
     ua = String(ua || '');
-    const os = /iPhone|iPad/.test(ua) ? 'iPhone' : /Android/.test(ua) ? 'Android' : /Mac OS/.test(ua) ? 'Mac' : /Windows/.test(ua) ? 'Windows' : 'Autre';
-    const br = /Brave/.test(ua) ? 'Brave' : /CriOS/.test(ua) ? 'Chrome' : /FxiOS|Firefox/.test(ua) ? 'Firefox' : /EdgA?\//.test(ua) ? 'Edge' : /SamsungBrowser/.test(ua) ? 'Samsung' : /Chrome\//.test(ua) ? 'Chrome' : /Safari\//.test(ua) ? 'Safari' : '';
+    let os = /iPad/.test(ua) ? 'iPad' : /iPhone/.test(ua) ? 'iPhone' : /Android/.test(ua) ? 'Android' : /Mac OS/.test(ua) ? 'Mac' : /Windows/.test(ua) ? 'Windows' : 'Autre';
+    // Modèle précis quand l'appareil le donne (surtout Android : « SM-G991B », « Pixel 7 »…)
+    const am = ua.match(/Android[^;]*;\s*([^;)]+?)(?:\s+Build|[);])/);
+    if (am && am[1]) { const m = am[1].trim().replace(/\s*\/.*$/, ''); if (m && !/^wv$/i.test(m)) os = 'Android · ' + m; }
+    const br = /Brave/.test(ua) ? 'Brave' : /CriOS/.test(ua) ? 'Chrome' : /FxiOS|Firefox/.test(ua) ? 'Firefox' : /EdgA?\//.test(ua) ? 'Edge' : /SamsungBrowser/.test(ua) ? 'Samsung Internet' : /OPR\/|Opera/.test(ua) ? 'Opera' : /Chrome\//.test(ua) ? 'Chrome' : /Safari\//.test(ua) ? 'Safari' : '';
     return os + (br ? ' · ' + br : '');
   }
   function evDetail(e) {
@@ -69,7 +72,7 @@
     const since = new Date(Date.now() - 30 * 864e5).toISOString();
     const [u, ev, msg, rd] = await Promise.all([
       rpc('admin_users'),
-      C.req('/rest/v1/events?select=id,created_at,user_id,device,type,data,version,ua&created_at=gte.' + encodeURIComponent(since) + '&order=created_at.desc&limit=5000', { auth: true }).catch(() => []),
+      C.req('/rest/v1/events?select=id,created_at,user_id,device,type,data,version,ua,ip&created_at=gte.' + encodeURIComponent(since) + '&order=created_at.desc&limit=5000', { auth: true }).catch(() => []),
       C.req('/rest/v1/messages?select=id,user_id,title,body,created_at&order=created_at.desc&limit=200', { auth: true }).catch(() => []),
       C.req('/rest/v1/message_reads?select=message_id,user_id', { auth: true }).catch(() => [])
     ]);
@@ -451,7 +454,10 @@
         '<div class="kv"><span>E-mail</span><b>' + esc(u.email) + '</b></div><div class="kv"><span>Connexion</span><b>' + (u.provider === 'google' ? 'Google' : 'E-mail et mot de passe') + '</b></div>' +
         '<div class="kv"><span>Inscription</span><b>' + esc(dt(u.created_at)) + '</b></div><div class="kv"><span>Dernière connexion</span><b>' + esc(dt(u.last_sign_in_at)) + '</b></div>' +
         '<div class="kv"><span>Dernière sauvegarde</span><b>' + esc(dt(u.updated_at)) + '</b></div><div class="kv"><span>Accord sauvegarde en ligne</span><b>' + esc(u.consent_at ? dt(u.consent_at) : 'non enregistré') + '</b></div>' +
-        (uev.length ? '<div class="kv"><span>Appareils</span><b>' + esc([...new Set(uev.map(e => device(e.ua)))].join(', ')) + '</b></div>' : '') +
+        (uev.length ? '<div class="kv"><span>Dernier appareil</span><b>' + esc(device((uev[0] || {}).ua) || '—') + '</b></div>' : '') +
+        (uev.length ? '<div class="kv"><span>Tous les appareils</span><b>' + esc([...new Set(uev.map(e => device(e.ua)).filter(Boolean))].join(', ') || '—') + '</b></div>' : '') +
+        (uev.some(e => e.ip) ? '<div class="kv"><span>Dernière IP</span><b style="font-size:13px">' + esc((uev.find(e => e.ip) || {}).ip || '—') + '</b></div>' : '') +
+        (uev.some(e => e.ip) ? '<div class="kv"><span>Toutes les IP (30 j)</span><b style="font-size:12px">' + esc([...new Set(uev.map(e => e.ip).filter(Boolean))].slice(0, 12).join(', ')) + '</b></div>' : '') +
         '<div class="kv"><span>Identifiant</span><b style="font-size:12px">' + esc(u.id) + '</b></div>' +
         '<div class="acts"><button class="btn ' + (banned ? 'primary' : 'outline') + '" data-a="ban">' + (banned ? 'Débloquer le compte' : 'Bloquer le compte') + '</button>' +
         (u.provider !== 'google' ? '<button class="btn outline" data-a="reset">Envoyer un lien de mot de passe</button>' : '') +
@@ -469,7 +475,7 @@
   function evRow(e) {
     const err = ERR_TYPES.includes(e.type);
     return '<div class="ev"><time>' + esc(short(e.created_at)) + '</time><div class="min0"><b' + (err ? ' style="color:var(--danger)"' : '') + '>' + esc(TYPE_LABEL[e.type] || e.type) + '</b>' +
-      (view !== 'users' ? ' · ' + esc(who(e)) : '') + '<small>' + esc([evDetail(e), e.ua ? device(e.ua) : '', e.version ? 'v' + e.version : ''].filter(Boolean).join(' · ')) + '</small></div></div>';
+      (view !== 'users' ? ' · ' + esc(who(e)) : '') + '<small>' + esc([evDetail(e), e.ua ? device(e.ua) : '', e.ip ? 'IP ' + e.ip : '', e.version ? 'v' + e.version : ''].filter(Boolean).join(' · ')) + '</small></div></div>';
   }
   function csvOf(d) {
     const num = v => String(Math.round((+v || 0) * 10) / 10).replace('.', ',');

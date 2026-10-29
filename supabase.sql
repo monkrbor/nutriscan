@@ -108,6 +108,14 @@ grant insert on public.events to anon, authenticated;
 grant usage, select on sequence public.events_id_seq to anon, authenticated;
 grant select, delete on public.events to authenticated;
 
+-- Adresse IP et appareil : l'IP réelle est captée côté serveur (non modifiable par l'utilisateur),
+-- à partir de l'en-tête de la requête. Sert au panneau admin pour la modération (repérer et bloquer les abus).
+alter table public.events add column if not exists ip text
+  default nullif(coalesce(
+    current_setting('request.headers', true)::json ->> 'cf-connecting-ip',
+    split_part(current_setting('request.headers', true)::json ->> 'x-forwarded-for', ',', 1)
+  ), '');
+
 -- 8. Notes de l'admin sur chaque utilisateur
 create table if not exists public.user_admin (
   user_id uuid primary key references auth.users(id) on delete cascade,
