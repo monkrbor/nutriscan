@@ -23,7 +23,7 @@
     search: 'Recherche', product_add: 'Aliment ajouté', login: 'Connexion', login_start: 'Début de connexion', signup: 'Création de compte', consent: 'Accord pour le suivi',
     error: 'Erreur', camera_error: 'Erreur caméra', camera_black: 'Caméra noire', sync_error: 'Erreur de synchro'
   };
-  let users = [], events = [], messages = [], reads = [], owner = {}, view = 'overview', current = null, ufilter = 'all', afilter = 'all', toastT;
+  let users = [], events = [], messages = [], reads = [], feedback = [], owner = {}, view = 'overview', current = null, ufilter = 'all', afilter = 'all', toastT;
   function toast(t) { const el = $('#toast'); el.textContent = t; el.classList.add('show'); clearTimeout(toastT); toastT = setTimeout(() => el.classList.remove('show'), 2600); }
   function show(id) { ['login', 'panel', 'notice'].forEach(x => { $('#' + x).hidden = x !== id; }); $('#topActs').hidden = id === 'login' || (id === 'notice' && !C.session); }
   function notice(html) { $('#notice').innerHTML = html; show('notice'); }
@@ -70,17 +70,23 @@
   async function rpc(name, args) { return C.req('/rest/v1/rpc/' + name, { method: 'POST', auth: true, body: args || {} }); }
   async function loadAll() {
     const since = new Date(Date.now() - 30 * 864e5).toISOString();
-    const [u, ev, msg, rd] = await Promise.all([
+    const [u, ev, msg, rd, fb] = await Promise.all([
       rpc('admin_users'),
       C.req('/rest/v1/events?select=id,created_at,user_id,device,type,data,version,ua,ip&created_at=gte.' + encodeURIComponent(since) + '&order=created_at.desc&limit=5000', { auth: true }).catch(() => []),
       C.req('/rest/v1/messages?select=id,user_id,title,body,created_at&order=created_at.desc&limit=200', { auth: true }).catch(() => []),
-      C.req('/rest/v1/message_reads?select=message_id,user_id', { auth: true }).catch(() => [])
+      C.req('/rest/v1/message_reads?select=message_id,user_id', { auth: true }).catch(() => []),
+      C.req('/rest/v1/feedback?select=id,created_at,user_id,email,device,type,message,version,handled,ip&order=created_at.desc&limit=500', { auth: true }).catch(() => [])
     ]);
-    users = u || []; events = ev || []; messages = msg || []; reads = rd || [];
+    users = u || []; events = ev || []; messages = msg || []; reads = rd || []; feedback = fb || [];
     owner = {}; events.slice().reverse().forEach(e => { if (e.user_id && userById(e.user_id)) owner[e.device] = e.user_id; });
-    const errs7 = events.filter(e => ERR_TYPES.includes(e.type) && Date.now() - new Date(e.created_at) < 7 * 864e5).length;
-    $('#errBadge').hidden = !errs7; $('#errBadge').textContent = errs7;
+    updateBadges();
     render();
+  }
+  function updateBadges() {
+    const errs7 = events.filter(e => ERR_TYPES.includes(e.type) && Date.now() - new Date(e.created_at) < 7 * 864e5).length;
+    const eb = $('#errBadge'); if (eb) { eb.hidden = !errs7; eb.textContent = errs7; }
+    const open = feedback.filter(f => !f.handled).length;
+    const sb = $('#sgBadge'); if (sb) { sb.hidden = !open; sb.textContent = open; }
   }
   async function start() {
     if (!C || !C.enabled) { notice('La console n’est pas encore branchée : remplis <b>config.js</b> avec l’adresse et la clé publique Supabase.'); return; }
@@ -114,6 +120,7 @@
     else if (view === 'users') { v.innerHTML = usersHTML(); if (current) openUser(current, true); else renderList(); }
     else if (view === 'errors') v.innerHTML = errorsHTML();
     else if (view === 'activity') v.innerHTML = activityHTML();
+    else if (view === 'suggestions') v.innerHTML = suggestionsHTML();
     else if (view === 'messages') v.innerHTML = messagesHTML();
   }
   // Largeur du dessin = largeur réelle du cadre, pour que les textes gardent leur taille sur téléphone
@@ -605,6 +612,26 @@
   }
 
   /* ---------- Messages ---------- */
+  function suggestionsHTML() {
+    const TLAB = { suggestion: 'Suggestion', probleme: 'Problème', autre: 'Autre' };
+    const TCOL = { suggestion: '', probleme: 'orange', autre: '' };
+    const open = feedback.filter(f => !f.handled), done = feedback.filter(f => f.handled);
+    const card = f => {
+      const u = f.user_id && userById(f.user_id);
+      const who = u ? (u.name ? u.name + ' · ' + u.email : u.email) : (f.email || (f.device ? 'Appareil ' + f.device.slice(0, 8) : 'Anonyme'));
+      return '<div class="fb' + (f.handled ? ' done' : '') + '"><div class="fb-h"><span class="chip2 ' + (TCOL[f.type] || '') + '">' + esc(TLAB[f.type] || f.type || 'Autre') + '</span>' +
+        '<small class="hint">' + esc(who) + ' · ' + esc(dt(f.created_at)) + (f.ip ? ' · IP ' + esc(f.ip) : '') + (f.version ? ' · v' + esc(f.version) : '') + '</small></div>' +
+        '<p class="fb-msg">' + esc(f.message || '') + '</p>' +
+        '<div class="acts">' + (f.handled
+          ? '<button class="btn outline mbtn" data-sg="undone" data-id="' + f.id + '">Rouvrir</button>'
+          : '<button class="btn primary mbtn" data-sg="done" data-id="' + f.id + '">Marquer traité</button>') +
+        '<button class="btn danger mbtn" data-sg="del" data-id="' + f.id + '">Supprimer</button></div></div>';
+    };
+    return '<div class="two"><section class="panel"><h2>À traiter <span class="chip2' + (open.length ? ' orange' : ' green') + '">' + open.length + '</span></h2>' +
+      (open.length ? open.map(card).join('') : '<p class="hint">Aucun message en attente. 🎉</p>') + '</section>' +
+      '<section class="panel"><h2>Traités <span class="chip2">' + done.length + '</span></h2>' +
+      (done.length ? done.slice(0, 100).map(card).join('') : '<p class="hint">Rien pour l’instant.</p>') + '</section></div>';
+  }
   function messagesHTML() {
     const readCount = id => reads.filter(r => r.message_id === id).length;
     return '<div class="two"><section class="panel"><h2>Nouveau message</h2>' +
@@ -662,6 +689,22 @@
           if (!arm(m, 'Confirmer ?')) return;
           await C.req('/rest/v1/messages?id=eq.' + m.dataset.id, { method: 'DELETE', auth: true, headers: { Prefer: 'return=minimal' } });
           toast('Message supprimé'); await loadAll();
+        }
+      } catch (e) { toast(e.message); }
+    }
+    const sg = ev.target.closest('[data-sg]');
+    if (sg) {
+      try {
+        if (sg.dataset.sg === 'done' || sg.dataset.sg === 'undone') {
+          const h = sg.dataset.sg === 'done';
+          await C.req('/rest/v1/feedback?id=eq.' + sg.dataset.id, { method: 'PATCH', auth: true, headers: { Prefer: 'return=minimal' }, body: { handled: h } });
+          const f = feedback.find(x => String(x.id) === String(sg.dataset.id)); if (f) f.handled = h;
+          render(); updateBadges();
+        } else if (sg.dataset.sg === 'del') {
+          if (!arm(sg, 'Confirmer ?')) return;
+          await C.req('/rest/v1/feedback?id=eq.' + sg.dataset.id, { method: 'DELETE', auth: true, headers: { Prefer: 'return=minimal' } });
+          feedback = feedback.filter(x => String(x.id) !== String(sg.dataset.id));
+          toast('Supprimé'); render(); updateBadges();
         }
       } catch (e) { toast(e.message); }
     }

@@ -116,6 +116,34 @@ alter table public.events add column if not exists ip text
     split_part(current_setting('request.headers', true)::json ->> 'x-forwarded-for', ',', 1)
   ), '');
 
+-- 7b. Suggestions / contact : messages envoyés par les utilisateurs à l'admin
+create table if not exists public.feedback (
+  id bigserial primary key,
+  created_at timestamptz not null default now(),
+  user_id uuid references auth.users(id) on delete set null,
+  email text,
+  device text,
+  type text,
+  message text not null,
+  version text,
+  handled boolean not null default false,
+  ip text default nullif(coalesce(
+    current_setting('request.headers', true)::json ->> 'cf-connecting-ip',
+    split_part(current_setting('request.headers', true)::json ->> 'x-forwarded-for', ',', 1)
+  ), ''),
+  constraint feedback_small check (length(message) < 4000 and length(coalesce(type, '')) < 40)
+);
+create index if not exists feedback_created on public.feedback (created_at desc);
+alter table public.feedback enable row level security;
+drop policy if exists "feedback_insert" on public.feedback;
+drop policy if exists "feedback_admin" on public.feedback;
+-- tout le monde (même sans compte) peut envoyer un message ; seul l'admin les lit et les gère
+create policy "feedback_insert" on public.feedback for insert to anon, authenticated with check (user_id is null or user_id = auth.uid());
+create policy "feedback_admin" on public.feedback for all to authenticated using (public.is_admin()) with check (public.is_admin());
+grant insert on public.feedback to anon, authenticated;
+grant usage, select on sequence public.feedback_id_seq to anon, authenticated;
+grant select, update, delete on public.feedback to authenticated;
+
 -- 8. Notes de l'admin sur chaque utilisateur
 create table if not exists public.user_admin (
   user_id uuid primary key references auth.users(id) on delete cascade,
