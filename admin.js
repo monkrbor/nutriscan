@@ -454,10 +454,10 @@
         '<div class="kv"><span>E-mail</span><b>' + esc(u.email) + '</b></div><div class="kv"><span>Connexion</span><b>' + (u.provider === 'google' ? 'Google' : 'E-mail et mot de passe') + '</b></div>' +
         '<div class="kv"><span>Inscription</span><b>' + esc(dt(u.created_at)) + '</b></div><div class="kv"><span>Dernière connexion</span><b>' + esc(dt(u.last_sign_in_at)) + '</b></div>' +
         '<div class="kv"><span>Dernière sauvegarde</span><b>' + esc(dt(u.updated_at)) + '</b></div><div class="kv"><span>Accord sauvegarde en ligne</span><b>' + esc(u.consent_at ? dt(u.consent_at) : 'non enregistré') + '</b></div>' +
-        (uev.length ? '<div class="kv"><span>Dernier appareil</span><b>' + esc(device((uev[0] || {}).ua) || '—') + '</b></div>' : '') +
+        '<div class="kv"><span>Dernier appareil</span><b>' + (uev.length ? esc(device((uev[0] || {}).ua) || '—') : '<span class="hint">à sa prochaine ouverture</span>') + '</b></div>' +
         (uev.length ? '<div class="kv"><span>Tous les appareils</span><b>' + esc([...new Set(uev.map(e => device(e.ua)).filter(Boolean))].join(', ') || '—') + '</b></div>' : '') +
-        (uev.some(e => e.ip) ? '<div class="kv"><span>Dernière IP</span><b style="font-size:13px">' + esc((uev.find(e => e.ip) || {}).ip || '—') + '</b></div>' : '') +
-        (uev.some(e => e.ip) ? '<div class="kv"><span>Toutes les IP (30 j)</span><b style="font-size:12px">' + esc([...new Set(uev.map(e => e.ip).filter(Boolean))].slice(0, 12).join(', ')) + '</b></div>' : '') +
+        '<div class="kv"><span>Dernière IP</span><b style="font-size:13px">' + (uev.some(e => e.ip) ? esc((uev.find(e => e.ip) || {}).ip) : '<span class="hint">à sa prochaine ouverture</span>') + '</b></div>' +
+        (uev.filter(e => e.ip).length > 1 ? '<div class="kv"><span>Toutes les IP (30 j)</span><b style="font-size:12px">' + esc([...new Set(uev.map(e => e.ip).filter(Boolean))].slice(0, 12).join(', ')) + '</b></div>' : '') +
         '<div class="kv"><span>Identifiant</span><b style="font-size:12px">' + esc(u.id) + '</b></div>' +
         '<div class="acts"><button class="btn ' + (banned ? 'primary' : 'outline') + '" data-a="ban">' + (banned ? 'Débloquer le compte' : 'Bloquer le compte') + '</button>' +
         (u.provider !== 'google' ? '<button class="btn outline" data-a="reset">Envoyer un lien de mot de passe</button>' : '') +
