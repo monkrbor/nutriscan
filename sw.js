@@ -3,7 +3,7 @@
 // - Modules de scan et polices : gardés en cache pour scanner sans réseau.
 // - Fiches et photos de produits déjà consultées : copie gardée pour les revoir hors ligne.
 // - Photos des recettes (Pexels) : copie gardée quand le site l'autorise, sinon affichées en direct.
-const CACHE = 'nutriscan-v13';
+const CACHE = 'nutriscan-v14';
 const RUNTIME = 'nutriscan-rt-v1';
 const PHOTOS = 'nutriscan-photos-v1';
 const FILES = ['./', './index.html', './styles.css', './app.js', './foods.js', './additives.js', './ingredients.js', './config.js', './cloud.js', './exercises.js', './figure.js', './recipes.js', './sport.js', './meals.js',
@@ -79,6 +79,8 @@ self.addEventListener('fetch', e => {
   if (/(^|\.)openfoodfacts\.org$/.test(url.hostname)) { e.respondWith(networkFirst(req, RUNTIME, 400)); return; }
   // Sauvegarde en ligne : jamais en cache
   if (/supabase\.co$/.test(url.hostname)) return;
+  // Profil d'installation iOS : toujours en direct du réseau (jamais via le cache)
+  if (url.pathname.endsWith('.mobileconfig')) return;
   if (url.origin !== location.origin) return;
   // Fichiers de l'appli
   e.respondWith(
