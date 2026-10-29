@@ -30,6 +30,9 @@
   .steps li::before{content:counter(s);position:absolute;left:0;top:8px;width:26px;height:26px;border-radius:50%;background:var(--accent);color:#fff;font-weight:700;font-size:.85rem;display:flex;align-items:center;justify-content:center}
   .note{background:var(--warnbg);border:1px solid color-mix(in srgb,var(--warn) 40%,transparent);color:var(--warn);border-radius:12px;padding:12px 14px;font-size:.9rem;margin-top:14px}
   .hide{display:none}
+  .chooser{display:flex;gap:10px;margin-bottom:16px}
+  .chooser button{flex:1;padding:12px;border-radius:12px;border:1.5px solid var(--line);background:var(--card);color:var(--text);font-weight:700;font-size:1rem;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px}
+  .chooser button.on{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 12%,transparent);color:var(--accent)}
   a.link{color:var(--accent)}
   .foot{text-align:center;color:var(--muted);font-size:.85rem;margin-top:22px}
   svg.ic{width:22px;height:22px;flex:0 0 auto}
@@ -40,6 +43,11 @@
   <div class="logo">
     <img src="icon-192.png" alt="">
     <div><h1>NutriScan</h1><small>Calories, scan, sport — gratuit</small></div>
+  </div>
+
+  <div class="chooser" id="chooser">
+    <button data-pf="ios" type="button">📱 iPhone</button>
+    <button data-pf="android" type="button">🤖 Android</button>
   </div>
 
   <!-- iPhone / iPad -->
@@ -97,10 +105,20 @@
   // iPadOS récent se fait passer pour un Mac : on détecte le tactile
   var isIOS = /iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
   var isAndroid = /Android/.test(ua);
-  var show = function(id){ var el = document.getElementById(id); if(el) el.classList.remove('hide'); };
-  if (isIOS) show('ios');
-  else if (isAndroid) show('android');
-  else show('desktop');
+  // Choix manuel iPhone / Android, en plus de la détection automatique
+  var chooser = document.getElementById('chooser');
+  function pick(pf){
+    ['ios','android','desktop'].forEach(function(id){ var e=document.getElementById(id); if(e) e.classList.add('hide'); });
+    var t = document.getElementById(pf); if(t) t.classList.remove('hide');
+    [].forEach.call(chooser.querySelectorAll('button'), function(b){ b.classList.toggle('on', b.getAttribute('data-pf')===pf); });
+  }
+  [].forEach.call(chooser.querySelectorAll('button'), function(b){
+    b.addEventListener('click', function(){ pick(b.getAttribute('data-pf')); });
+  });
+  // Affiche d'abord la plateforme détectée ; l'utilisateur peut changer avec le sélecteur
+  if (isIOS) pick('ios');
+  else if (isAndroid) pick('android');
+  else { var d=document.getElementById('desktop'); if(d) d.classList.remove('hide'); }
 
   // Android : installation native via l'événement du navigateur
   var deferred = null;

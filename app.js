@@ -1637,6 +1637,7 @@
       '<div class="setrow" style="border-top:0;padding-top:0"><span>Rapports d’erreurs et statistiques d’utilisation</span>' + seg + '</div>' +
       '<p class="hint">Ils servent à repérer et corriger les bugs (caméra, scans ratés, erreurs). Rien sur tes quantités, ton poids ou ta santé.</p>' +
       '<div class="prose">' + PRIVACY + '</div>' +
+      '<div class="menu" style="margin-top:12px"><button data-act="contact">' + ic('i-help') + '<span class="grow">Contacter l’équipe / Suggestion</span>' + ic('i-right', 'sm') + '</button></div>' +
       '<button class="linkbtn" data-act="termsPush">Conditions d’utilisation</button>' +
       '<p class="hint">NutriScan ' + VERSION + '<br>Données produits : Open Food Facts, licence ODbL.<br>Photos des recettes : Pexels.</p>');
     openLayer({ el });
@@ -1685,6 +1686,38 @@
         C.req('/rest/v1/message_reads', { method: 'POST', auth: true, headers: { Prefer: 'resolution=ignore-duplicates,return=minimal' }, body: unread.map(m => ({ message_id: m.id, user_id: me })) }).catch(() => {});
       } });
     } catch (e) { /* pas de messages */ }
+  }
+  function openContact() {
+    const types = [['suggestion', 'Suggestion / idée'], ['probleme', 'Problème / bug'], ['autre', 'Autre']];
+    const el = mountSheet(head('Contacter l’équipe') +
+      '<p class="hint" style="margin-top:0">Une idée, un bug, une remarque ? Écris-nous, on lit tout. Réponse possible seulement si tu as un compte.</p>' +
+      '<div class="field"><label for="coType">Sujet</label><select id="coType">' + types.map(t => '<option value="' + t[0] + '">' + t[1] + '</option>').join('') + '</select></div>' +
+      '<div class="field"><label for="coMsg">Ton message</label><textarea id="coMsg" rows="5" placeholder="Décris ton idée ou ton problème…"></textarea></div>' +
+      '<p class="hint" id="coErr" style="color:var(--danger);display:none"></p>' +
+      '<button class="btn primary block" data-act="contactSend">Envoyer</button>');
+    openLayer({ el });
+  }
+  async function sendContact(btn) {
+    const el = btn.closest('.sheet') || document;
+    const msg = ($('#coMsg', el) || {}).value && $('#coMsg', el).value.trim();
+    const type = ($('#coType', el) || {}).value || 'autre';
+    const err = $('#coErr', el);
+    const showErr = t => { if (err) { err.textContent = t; err.style.display = 'block'; } };
+    if (!msg || msg.length < 3) { showErr('Écris ton message avant d’envoyer.'); return; }
+    if (msg.length > 3500) { showErr('Message trop long (3500 caractères max).'); return; }
+    if (!C.enabled || !navigator.onLine) { showErr('Connecte-toi à Internet pour envoyer ton message.'); return; }
+    btn.disabled = true; btn.textContent = 'Envoi…';
+    const uid = C.session && C.session.user ? C.session.user.id : null;
+    const email = C.session && C.session.user ? C.session.user.email : null;
+    try {
+      await C.req('/rest/v1/feedback', { method: 'POST', auth: !!uid, headers: { Prefer: 'return=minimal' },
+        body: { user_id: uid, email: email, device: DEVICE, type: type, message: msg, version: VERSION } });
+      try { track('feedback', { type: type }); } catch (e) { /* rien */ }
+      closeTop(); toast('Merci ! Ton message est bien arrivé.');
+    } catch (e) {
+      btn.disabled = false; btn.textContent = 'Envoyer';
+      showErr('Envoi impossible pour l’instant. Réessaie dans un moment.');
+    }
   }
   function openPrivacy(swap) {
     const el = mountSheet(head('Confidentialité') + '<div class="prose">' + PRIVACY + '</div>');
@@ -2247,6 +2280,8 @@
     about: () => openAbout(),
     privacyPush: () => openPrivacy(),
     termsPush: () => openTerms(),
+    contact: () => openContact(),
+    contactSend: b => sendContact(b),
     syncNow: () => { sync({ push: true }).then(ok => toast(ok ? 'Sauvegardé en ligne' : (navigator.onLine ? (syncError || 'Sauvegarde impossible pour l’instant') : 'Hors ligne : ce sera envoyé au retour d’Internet'))); },
     syncPull: async () => { try { const r = await C.pull(); if (r) offerRemote(r); else toast('Aucune sauvegarde en ligne pour l’instant'); } catch (e) { toast(e.message); } },
     newPassword: () => openNewPassword(),
