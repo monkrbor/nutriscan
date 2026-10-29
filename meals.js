@@ -6,8 +6,6 @@
   if (!A || !RB) return;
   const { esc, ic, fk, num, today, addDays, parseYmd, toast, arm, $, $$ } = A;
   const I = RB.I, R = RB.R, RM = Object.fromEntries(R.map(r => [r.id, r]));
-  const CUIS = [['maghrebine', 'Maghrébine'], ['francaise', 'Française'], ['italienne', 'Italienne'], ['asiatique', 'Asiatique'], ['mexicaine', 'Mexicaine'], ['indienne', 'Indienne'], ['libanaise', 'Libanaise'], ['americaine', 'Américaine']];
-  const CUISN = Object.fromEntries(CUIS);
   const DIETS = [['omni', 'Je mange de tout', 'Viande, poisson, œufs, laitages (jamais de porc)'], ['pesco', 'Poisson mais pas de viande', ''], ['vege', 'Végétarien', 'Œufs et laitages, pas de viande ni de poisson'], ['vegan', 'Végan', 'Rien d’origine animale']];
   const PROTS = [['poulet', 'Poulet'], ['dinde', 'Dinde'], ['boeuf', 'Bœuf'], ['agneau', 'Agneau'], ['f', 'Poisson'], ['s', 'Fruits de mer'], ['e', 'Œufs']];
   const AVOID = [['d', 'Lait'], ['g', 'Gluten'], ['n', 'Fruits à coque'], ['a', 'Arachide'], ['z', 'Sésame'], ['y', 'Soja'], ['champi', 'Champignons'], ['poivron', 'Poivron'], ['aubergine', 'Aubergine'], ['avocat', 'Avocat'], ['spicy', 'Épicé'], ['coriandre', 'Coriandre'], ['olives', 'Olives'], ['coco', 'Lait de coco']];
@@ -41,7 +39,7 @@
     return true;
   }
   const pool = (type, p) => R.filter(r => r.type === type && allowed(r, p));
-  function liked(r, p) { return !p || !(p.cuis || []).length || p.cuis.includes(r.cuisine); }
+  function liked(r) { return (ck().favs || []).includes(r.id); }
 
   /* ---------- Quantités affichées ---------- */
   function qty(k, g, shop) {
@@ -58,6 +56,11 @@
     return Math.round(g) + ' g';
   }
   const ingName = k => (I[k] ? I[k][0] : k);
+  /* ---------- Photos (Pexels) : l'emoji reste dessous si la photo ne charge pas (hors ligne…) ---------- */
+  const phUrl = (id, w, h) => 'https://images.pexels.com/photos/' + id + '/pexels-photo-' + id + '.jpeg?auto=compress&cs=tinysrgb&fit=crop&w=' + w + '&h=' + h;
+  const thumb = r => '<span class="rc-emo" aria-hidden="true">' + r.emoji + (r.ph ? '<img src="' + phUrl(r.ph, 160, 160) + '" alt="" loading="lazy" decoding="async">' : '') + '</span>';
+  document.addEventListener('error', e => { const t = e.target; if (t && t.tagName === 'IMG' && t.closest('.rc-emo,.rc-hero')) t.remove(); }, true);
+  document.addEventListener('load', e => { const t = e.target; if (t && t.tagName === 'IMG' && t.closest('.rc-emo,.rc-hero')) t.classList.add('on'); }, true);
 
   /* ---------- Produit « recette » pour le journal ---------- */
   function asProduct(r) {
@@ -124,7 +127,7 @@
   let filt = 'all', q = '';
   function card(r, m, extra) {
     const kcal = Math.round(r.kcal * (m || 1)), prot = Math.round(r.p * (m || 1)), fav = (ck().favs || []).includes(r.id);
-    return '<button class="rc" data-rc="' + r.id + '"' + (m ? ' data-m="' + m + '"' : '') + '><span class="rc-emo" aria-hidden="true">' + r.emoji + '</span><span class="min0"><b>' + esc(r.n) + (fav ? ' ' + ic('i-heart', 'sm fav') : '') + '</b>' +
+    return '<button class="rc" data-rc="' + r.id + '"' + (m ? ' data-m="' + m + '"' : '') + '>' + thumb(r) + '<span class="min0"><b>' + esc(r.n) + (fav ? ' ' + ic('i-heart', 'sm fav') : '') + '</b>' +
       '<small>' + r.time + ' min · ' + fk(kcal) + ' kcal · ' + prot + ' g prot.' + (m && m !== 1 ? ' · ' + mtxt(m) : '') + (extra ? ' · ' + esc(extra) : '') + '</small></span></button>';
   }
   function render(el) {
@@ -138,7 +141,7 @@
     else if (filt === 'quick') list = list.filter(r => r.time <= 20);
     else if (filt === 'prot') list = list.filter(r => r.p >= 30 || (r.type !== 'main' && r.p >= 15));
     else if (filt === 'fav') list = list.filter(r => (c.favs || []).includes(r.id));
-    if (q) { const nq = q.toLowerCase(); list = list.filter(r => (r.n + ' ' + r.ing.map(([k]) => ingName(k)).join(' ') + ' ' + CUISN[r.cuisine]).toLowerCase().includes(nq)); }
+    if (q) { const nq = q.toLowerCase(); list = list.filter(r => (r.n + ' ' + r.ing.map(([k]) => ingName(k)).join(' ')).toLowerCase().includes(nq)); }
     list.sort((a, b) => (liked(b, p) - liked(a, p)) || a.n.localeCompare(b.n, 'fr'));
     el.innerHTML = '<header class="page-head"><h1 class="page-title">Repas</h1><button class="iconbtn" data-ml="quiz" aria-label="Mes goûts">' + ic('i-edit') + '</button></header>' +
       (!p ? '<section class="card ml-hero"><h2>Qu’est-ce qu’on mange ?</h2><p class="hint">Dis-nous ce que tu aimes : on te propose des plats qui rentrent dans tes calories, un menu pour la semaine et la liste de courses. Jamais de porc, d’alcool ni de sang.</p><button class="btn primary" data-ml="quiz">Dire ce que j’aime</button></section>' : '') +
@@ -151,7 +154,7 @@
       '<section class="card"><div class="card-title"><h2>Recettes</h2><span class="hint">' + list.length + '</span></div>' +
       '<div class="searchbox" style="margin-bottom:10px">' + ic('i-search', 'sm') + '<input id="mlQ" type="search" placeholder="Poulet, pâtes, 15 min…" value="' + esc(q) + '" autocomplete="off" aria-label="Chercher une recette"></div>' +
       '<div class="chips" style="margin-bottom:6px">' + [['all', 'Tout'], ['bf', 'Petit-déj'], ['main', 'Plats'], ['snack', 'Collations'], ['quick', '20 min max'], ['prot', 'Riches en protéines'], ['fav', 'Favoris']].map(f => '<button class="chip' + (filt === f[0] ? ' on' : '') + '" data-mf="' + f[0] + '">' + f[1] + '</button>').join('') + '</div>' +
-      (list.length ? list.map(r => card(r, 0, CUISN[r.cuisine])).join('') : '<p class="hint">Aucune recette trouvée.</p>') + '</section>';
+      (list.length ? list.map(r => card(r, 0)).join('') : '<p class="hint">Aucune recette trouvée.</p>') + '</section>';
   }
 
   /* ================= Fiche recette ================= */
@@ -160,8 +163,8 @@
     let ppl = (ck().prefs && ck().prefs.people) || 1;
     const m = m0 || 1;
     const el = A.mountSheet('<div class="grab"></div><div class="rc-top"><button class="iconbtn" data-act="close" aria-label="Fermer">' + ic('i-x') + '</button><span class="ps-src">Recette</span><button class="iconbtn star" data-rr="fav" aria-label="Favori">' + ic('i-heart') + '</button></div>' +
-      '<div class="rc-hero"><span aria-hidden="true">' + r.emoji + '</span></div><h2 class="rc-title">' + esc(r.n) + '</h2>' +
-      '<div class="tags"><span class="tag">' + ic('i-clock', 'sm') + ' ' + r.time + ' min</span><span class="tag">' + ['', 'Facile', 'Moyen', 'Difficile'][r.lvl] + '</span><span class="tag">' + esc(CUISN[r.cuisine]) + '</span>' + (DIETTXT[r.diet] ? '<span class="tag">' + DIETTXT[r.diet] + '</span>' : '') + '</div>' +
+      '<div class="rc-hero' + (r.ph ? ' ph' : '') + '"><span aria-hidden="true">' + r.emoji + '</span>' + (r.ph ? '<img src="' + phUrl(r.ph, 800, 460) + '" alt="' + esc(r.n) + '" decoding="async">' : '') + '</div><h2 class="rc-title">' + esc(r.n) + '</h2>' +
+      '<div class="tags"><span class="tag">' + ic('i-clock', 'sm') + ' ' + r.time + ' min</span><span class="tag">' + ['', 'Facile', 'Moyen', 'Difficile'][r.lvl] + '</span>' + (DIETTXT[r.diet] ? '<span class="tag">' + DIETTXT[r.diet] + '</span>' : '') + '</div>' +
       '<div class="tiles"><div class="tile"><b class="num">' + fk(r.kcal * m) + '</b><span>kcal</span></div><div class="tile"><b class="num" style="color:var(--prot)">' + Math.round(r.p * m) + ' g</b><span>Protéines</span></div><div class="tile"><b class="num" style="color:var(--carb)">' + Math.round(r.c * m) + ' g</b><span>Glucides</span></div><div class="tile"><b class="num" style="color:var(--fat)">' + Math.round(r.f * m) + ' g</b><span>Lipides</span></div></div>' +
       '<p class="hint center">Pour ' + mtxt(m) + ' (' + fk(r.g * m) + ' g)</p>' +
       '<div class="rc-sec"><div class="rc-sec-h"><h3>Ingrédients</h3><div class="amt sm"><button data-rr="minus" aria-label="Moins de personnes">' + ic('i-minus') + '</button><b id="rcPpl"></b><button data-rr="plus" aria-label="Plus de personnes">' + ic('i-plus') + '</button></div></div><ul class="rc-ing" id="rcIng"></ul></div>' +
@@ -188,10 +191,10 @@
   /* ================= Questionnaire de goûts ================= */
   function openQuiz() {
     const c = ck();
-    const d = Object.assign({ diet: 'omni', prots: PROTS.map(x => x[0]), avoid: [], cuis: [], time: 0, budget: 0, noOven: false, noMixer: false, slots: ['lunch', 'dinner'], people: 1 }, c.prefs || {});
-    ['prots', 'avoid', 'cuis', 'slots'].forEach(k => { d[k] = (d[k] || []).slice(); });
+    const d = Object.assign({ diet: 'omni', prots: PROTS.map(x => x[0]), avoid: [], time: 0, budget: 0, noOven: false, noMixer: false, slots: ['lunch', 'dinner'], people: 1 }, c.prefs || {});
+    ['prots', 'avoid', 'slots'].forEach(k => { d[k] = (d[k] || []).slice(); });
     let step = 0;
-    const steps = ['diet', 'avoid', 'cuis', 'practical', 'menu'];
+    const steps = ['diet', 'avoid', 'practical', 'menu'];
     const el = A.mountSheet('<div class="grab"></div><div class="sheet-head"><h3>Mes goûts</h3><button class="iconbtn" data-act="close" aria-label="Fermer">' + ic('i-x') + '</button></div><div id="mlq"></div>', { tall: true, foot: true });
     A.openLayer({ el });
     const chip = (k, v, label, on) => '<button class="chip' + (on ? ' on' : '') + '" data-k="' + k + '" data-v="' + v + '">' + esc(label) + '</button>';
@@ -202,7 +205,6 @@
         (d.diet === 'omni' || d.diet === 'pesco' ? '<p class="flabel">Ce que tu manges (décoche ce que tu n’aimes pas)</p><div class="chips">' + PROTS.filter(x => d.diet === 'omni' || !['poulet', 'dinde', 'boeuf', 'agneau'].includes(x[0])).map(x => chip('prots', x[0], x[1], d.prots.includes(x[0]))).join('') + '</div>' : '') +
         '<p class="hint" style="margin-top:10px">Les recettes ne contiennent jamais de porc, d’alcool ni de sang.</p>';
       if (k === 'avoid') h = '<h2 class="q-t">Allergies et aliments que tu n’aimes pas</h2><p class="hint">Les recettes qui en contiennent seront cachées.</p><div class="chips">' + AVOID.map(x => chip('avoid', x[0], x[1], d.avoid.includes(x[0]))).join('') + '</div>';
-      if (k === 'cuis') h = '<h2 class="q-t">Les cuisines que tu préfères</h2><p class="hint">Elles seront proposées en premier. Ne coche rien si tu aimes tout.</p><div class="chips">' + CUIS.map(x => chip('cuis', x[0], x[1], d.cuis.includes(x[0]))).join('') + '</div>';
       if (k === 'practical') h = '<h2 class="q-t">En cuisine</h2><p class="flabel">Temps maximum pour préparer</p><div class="chips">' + [[15, '15 min'], [30, '30 min'], [45, '45 min'], [0, 'Peu importe']].map(x => '<button class="chip' + (d.time === x[0] ? ' on' : '') + '" data-k="time" data-v="' + x[0] + '" data-one="1">' + x[1] + '</button>').join('') + '</div>' +
         '<p class="flabel">Budget</p><div class="chips">' + [[1, 'Petit budget'], [0, 'Peu importe']].map(x => '<button class="chip' + (d.budget === x[0] ? ' on' : '') + '" data-k="budget" data-v="' + x[0] + '" data-one="1">' + x[1] + '</button>').join('') + '</div>' +
         '<p class="flabel">Matériel que tu n’as pas</p><div class="chips"><button class="chip' + (d.noOven ? ' on' : '') + '" data-k="noOven" data-v="1" data-flag="1">Pas de four</button><button class="chip' + (d.noMixer ? ' on' : '') + '" data-k="noMixer" data-v="1" data-flag="1">Pas de mixeur</button></div>';
@@ -225,8 +227,9 @@
       if (n.dataset.n === 'back') { step--; draw(); return; }
       if (step < steps.length - 1) { step++; draw(); return; }
       if (!d.slots.length) d.slots = ['lunch', 'dinner'];
+      delete d.cuis;
       const cc = ck(); cc.prefs = d; touch();
-      A.track('meal_prefs', { diet: d.diet, cuis: d.cuis.length });
+      A.track('meal_prefs', { diet: d.diet });
       A.closeTop(); A.renderAll(); toast('Tes goûts sont enregistrés');
     });
     draw();

@@ -2,8 +2,10 @@
 // - Fichiers de l'appli : réseau d'abord (pour recevoir les mises à jour), sinon la copie en cache.
 // - Modules de scan et polices : gardés en cache pour scanner sans réseau.
 // - Fiches et photos de produits déjà consultées : copie gardée pour les revoir hors ligne.
-const CACHE = 'nutriscan-v8';
+// - Photos des recettes (Pexels) : copie gardée quand le site l'autorise, sinon affichées en direct.
+const CACHE = 'nutriscan-v9';
 const RUNTIME = 'nutriscan-rt-v1';
+const PHOTOS = 'nutriscan-photos-v1';
 const FILES = ['./', './index.html', './styles.css', './app.js', './foods.js', './additives.js', './ingredients.js', './config.js', './cloud.js', './exercises.js', './figure.js', './recipes.js', './sport.js', './meals.js',
   './manifest.webmanifest', './icon.svg', './icon-180.png', './icon-192.png', './icon-512.png'];
 const LIBS = ['https://cdn.jsdelivr.net/npm/barcode-detector@3.0.7/dist/iife/ponyfill.min.js', 'https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js'];
@@ -18,7 +20,7 @@ self.addEventListener('install', e => {
 });
 self.addEventListener('activate', e => {
   e.waitUntil(caches.keys()
-    .then(keys => Promise.all(keys.filter(k => k !== CACHE && k !== RUNTIME).map(k => caches.delete(k))))
+    .then(keys => Promise.all(keys.filter(k => k !== CACHE && k !== RUNTIME && k !== PHOTOS).map(k => caches.delete(k))))
     .then(() => self.clients.claim()));
 });
 
@@ -45,6 +47,19 @@ async function networkFirst(req, cacheName, max) {
   }
 }
 
+async function recipePhoto(req) {
+  const c = await caches.open(PHOTOS);
+  const hit = await c.match(req.url);
+  if (hit) return hit;
+  try {
+    const res = await fetch(req.url, { mode: 'cors', credentials: 'omit' });
+    if (res.ok) { c.put(req.url, res.clone()); trim(PHOTOS, 160); }
+    return res;
+  } catch (err) {
+    return fetch(req); // pas d'accès CORS : affichée sans copie (ou erreur hors ligne → l'emoji reste)
+  }
+}
+
 self.addEventListener('fetch', e => {
   const req = e.request;
   if (req.method !== 'GET') return;
@@ -53,6 +68,8 @@ self.addEventListener('fetch', e => {
   if (/barcode-detector@3\.0\.7|zxing-wasm@|html5-qrcode@2\.3\.8/.test(url.href)) { e.respondWith(cacheFirst(req, CACHE)); return; }
   // Polices
   if (url.hostname === 'fonts.googleapis.com' || url.hostname === 'fonts.gstatic.com') { e.respondWith(cacheFirst(req, RUNTIME)); return; }
+  // Photos des recettes
+  if (url.hostname === 'images.pexels.com') { e.respondWith(recipePhoto(req)); return; }
   // Photos de produits
   if (url.hostname === 'images.openfoodfacts.org') {
     e.respondWith(cacheFirst(req, RUNTIME).then(r => { trim(RUNTIME, 400); return r; }).catch(() => new Response('', { status: 504 })));
