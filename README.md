@@ -18,7 +18,7 @@ Appli en ligne : **https://monkrbor.github.io/nutriscan/**
 - **Détail de chaque additif E** (≈ 250 additifs) : nom, rôle, origine, info santé ; ingrédients surlignés
 - **Comptes** par e-mail + mot de passe ou avec Google, **sauvegarde en ligne** (Supabase) avec consentement, sauvegarde automatique, récupération sur un autre téléphone, suppression du compte
 - **Statistiques et rapports d'erreurs** seulement si l'utilisateur accepte au premier lancement (modifiable dans Profil → À propos)
-- **Panneau admin** (`admin.html`) : vue d'ensemble (comptes, appareils actifs, réussite des scans, erreurs), gestion des utilisateurs (bloquer, débloquer, supprimer, lien de mot de passe, note privée, signalement, objectifs, sauvegardes et versions), erreurs regroupées, activité, messages aux utilisateurs
+- **Panneau admin** (`admin.html`) : vue d’ensemble (comptes, appareils actifs, réussite des scans, erreurs) ; liste des comptes avec leur progression (jours suivis, poids, objectif) ; fiche complète de chaque utilisateur (courbe de poids, calories sur 30 jours, moyennes, régularité, journal jour par jour, profil, aliments créés) ; export JSON ou tableur, export de tous les comptes, restauration depuis un fichier, une version précédente ou une sauvegarde complète ; bloquer, supprimer, lien de mot de passe, note privée, messages ; erreurs regroupées et activité
 - **Eau** (verres de 250 ml), **activités** (calories brûlées estimées, ajoutées au budget), **poids**
 - **Progrès** : calories sur 7 ou 30 jours, macros moyennes, courbe de poids, IMC, régularité
 - **Profil** : objectifs modifiables, thème clair / sombre / automatique, sauvegarde et restauration des données

@@ -43,7 +43,7 @@ drop policy if exists "backups_insert" on public.backups;
 drop policy if exists "backups_update" on public.backups;
 drop policy if exists "backups_delete" on public.backups;
 create policy "backups_select" on public.backups for select to authenticated using (auth.uid() = user_id or public.is_admin());
-create policy "backups_insert" on public.backups for insert to authenticated with check (auth.uid() = user_id);
+create policy "backups_insert" on public.backups for insert to authenticated with check (auth.uid() = user_id or public.is_admin());
 create policy "backups_update" on public.backups for update to authenticated using (auth.uid() = user_id or public.is_admin()) with check (auth.uid() = user_id or public.is_admin());
 create policy "backups_delete" on public.backups for delete to authenticated using (auth.uid() = user_id or public.is_admin());
 
@@ -149,15 +149,25 @@ grant usage, select on sequence public.messages_id_seq to authenticated;
 grant select, insert, delete on public.message_reads to authenticated;
 
 -- 10. Gestion des comptes par l'admin
-create or replace function public.admin_users()
+-- Liste des comptes avec un résumé de leur progression (jours suivis, poids de départ et actuel, objectif)
+create or replace function public.ns_num(v text) returns numeric
+language sql immutable as $$ select case when v ~ '^-?[0-9]+(\.[0-9]+)?$' then v::numeric end $$;
+drop function if exists public.admin_users();
+create function public.admin_users()
 returns table (id uuid, email text, provider text, created_at timestamptz, last_sign_in_at timestamptz, banned_until timestamptz,
-               name text, entries_count int, updated_at timestamptz, consent_at timestamptz, note text, flagged boolean)
+               name text, entries_count int, updated_at timestamptz, consent_at timestamptz, note text, flagged boolean,
+               days_tracked int, last_day text, first_kg numeric, last_kg numeric, goal_kg numeric, goal text, kcal_goal numeric, data_size int)
 language plpgsql stable security definer set search_path = public, auth as $$
 begin
   if not public.is_admin() then raise exception 'Accès réservé à l''administrateur'; end if;
   return query
     select u.id, u.email::text, coalesce(u.raw_app_meta_data->>'provider', 'email')::text, u.created_at, u.last_sign_in_at, u.banned_until,
-           b.name, b.entries_count, b.updated_at, b.consent_at, a.note, coalesce(a.flagged, false)
+           b.name, b.entries_count, b.updated_at, b.consent_at, a.note, coalesce(a.flagged, false),
+           (select count(distinct e->>'date')::int from jsonb_array_elements(case when jsonb_typeof(b.data->'entries') = 'array' then b.data->'entries' else '[]'::jsonb end) e),
+           (select max(e->>'date') from jsonb_array_elements(case when jsonb_typeof(b.data->'entries') = 'array' then b.data->'entries' else '[]'::jsonb end) e),
+           public.ns_num(b.data->'weights'->0->>'kg'), public.ns_num(b.data->'weights'->-1->>'kg'),
+           public.ns_num(b.data->'profile'->>'goalWeight'), (b.data->'profile'->>'goal')::text, public.ns_num(b.data->'goals'->>'kcal'),
+           octet_length(b.data::text)
     from auth.users u
     left join public.backups b on b.user_id = u.id
     left join public.user_admin a on a.user_id = u.id

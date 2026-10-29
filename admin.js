@@ -108,13 +108,15 @@
     $$('#nav button').forEach(b => b.classList.toggle('on', b.dataset.v === view));
     const v = $('#view');
     if (view === 'overview') v.innerHTML = overviewHTML();
-    else if (view === 'users') { v.innerHTML = usersHTML(); renderList(); if (current) openUser(current, true); }
+    else if (view === 'users') { v.innerHTML = usersHTML(); if (current) openUser(current, true); else renderList(); }
     else if (view === 'errors') v.innerHTML = errorsHTML();
     else if (view === 'activity') v.innerHTML = activityHTML();
     else if (view === 'messages') v.innerHTML = messagesHTML();
   }
+  // Largeur du dessin = largeur réelle du cadre, pour que les textes gardent leur taille sur téléphone
+  const chartW = () => Math.round(Math.min(600, Math.max(300, window.innerWidth >= 760 ? window.innerWidth / 2 - 90 : window.innerWidth - 66)));
   function barsSVG(days, vals, color, label) {
-    const W = 560, H = 140, top = 10, bottom = 22, n = days.length, slot = W / n, bw = Math.min(26, slot * 0.6);
+    const W = chartW(), H = 140, top = 14, bottom = 22, n = days.length, slot = W / n, bw = Math.min(26, slot * 0.6);
     const max = Math.max(1, ...vals);
     let s = '<svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="' + esc(label) + '"><line x1="0" x2="' + W + '" y1="' + (H - bottom) + '" y2="' + (H - bottom) + '" stroke="var(--line)"/>';
     vals.forEach((v, i) => {
@@ -173,39 +175,128 @@
   }
 
   /* ---------- Utilisateurs ---------- */
-  function usersHTML() {
-    const f = [['all', 'Tous'], ['active', 'Actifs 7 j'], ['new', 'Nouveaux'], ['flagged', 'Signalés'], ['banned', 'Bloqués'], ['nobackup', 'Sans sauvegarde']];
-    return '<div class="grid"><div class="users">' +
-      '<div class="searchbox"><svg class="ic sm"><use href="#i-search"/></svg><input id="q" type="search" placeholder="Nom ou e-mail" autocomplete="off" aria-label="Rechercher un compte"></div>' +
-      '<div class="filters">' + f.map(x => '<button data-f="' + x[0] + '"' + (ufilter === x[0] ? ' class="on"' : '') + '>' + x[1] + '</button>').join('') + '</div>' +
-      '<div id="list"></div></div><aside class="panel detail" id="detail"><p class="empty-d">Choisis un compte pour le gérer.</p></aside></div>';
+  let utab = 'progress', ucache = null, jday = null, pendingAll = null;
+  const MEALS = [['breakfast', 'Petit-déjeuner'], ['lunch', 'Déjeuner'], ['dinner', 'Dîner'], ['snack', 'Collations']];
+  const UTABS = [['progress', 'Progression'], ['journal', 'Journal'], ['data', 'Profil et aliments'], ['backups', 'Sauvegardes'], ['account', 'Compte'], ['activity', 'Activité']];
+  const n1 = v => (Math.round((+v || 0) * 10) / 10).toLocaleString('fr-FR');
+  const kg = v => v == null || v === '' || !isFinite(v) ? '—' : n1(v) + ' kg';
+  const sgn = v => (v > 0 ? '+' : v < 0 ? '−' : '') + n1(Math.abs(v));
+  const dayFR = (d, o) => new Date(d + 'T12:00:00').toLocaleDateString('fr-FR', o || { weekday: 'short', day: 'numeric', month: 'short' });
+  const addDays = (d, n) => day(new Date(d + 'T12:00:00').getTime() + n * 864e5);
+  const ddmm = d => String(d || '').slice(8) + '/' + String(d || '').slice(5, 7);
+  const isBanned = u => !!u.banned_until && (String(u.banned_until) === 'infinity' || new Date(u.banned_until) > new Date());
+  const GOAL_TXT = { lose: 'Perdre du poids', gain: 'Prendre du muscle', maintain: 'Garder son poids' };
+  const ACT_TXT = { sedentary: 'Sédentaire', light: 'Peu actif', moderate: 'Actif', very: 'Très actif', active: 'Très actif' };
+  function bytes(n) { n = +n || 0; return n < 1024 ? n + ' o' : n < 1048576 ? Math.round(n / 1024) + ' Ko' : n1(n / 1048576) + ' Mo'; }
+
+  // Résumé chiffré d'une sauvegarde : totaux par jour, séries, moyennes
+  function stats(d) {
+    const byDay = {};
+    (d.entries || []).forEach(e => {
+      const x = byDay[e.date] = byDay[e.date] || { kcal: 0, p: 0, c: 0, f: 0, n: 0 };
+      x.kcal += +e.kcal || 0; x.p += +e.p || 0; x.c += +e.c || 0; x.f += +e.f || 0; x.n++;
+    });
+    const days = Object.keys(byDay).sort();
+    const set = new Set(days), today = day(Date.now());
+    let cur = 0, k = set.has(today) ? today : addDays(today, -1);
+    while (set.has(k)) { cur++; k = addDays(k, -1); }
+    let best = 0, run = 0, prev = null;
+    days.forEach(x => { run = prev && addDays(prev, 1) === x ? run + 1 : 1; best = Math.max(best, run); prev = x; });
+    const last = n => days.filter(x => x > addDays(today, -n));
+    const avg = (list, f) => list.length ? list.reduce((a, x) => a + byDay[x][f], 0) / list.length : 0;
+    const w = (d.weights || []).filter(x => x && +x.kg > 0);
+    return { byDay, days, cur, best, last, avg, w, first: w[0], lastW: w[w.length - 1] };
   }
-  const isBanned = u => u.banned_until && new Date(u.banned_until) > new Date();
+  function exByDay(d) { const o = {}; (d.exercises || []).forEach(x => { (o[x.date] = o[x.date] || []).push(x); }); return o; }
+
+  /* Graphiques (SVG) : une seule série, objectif en pointillé, infobulle au survol ou au toucher */
+  function weightSVG(points, goal) {
+    const W = chartW(), H = 200, L = 44, R = 14, T = 14, B = 26;
+    const pts = points.slice(-120);
+    const t = p => new Date(p.date + 'T12:00:00').getTime();
+    const t0 = t(pts[0]), t1 = Math.max(t(pts[pts.length - 1]), t0 + 864e5);
+    const vals = pts.map(p => +p.kg).concat(goal ? [goal] : []);
+    let lo = Math.floor(Math.min(...vals) - 1), hi = Math.ceil(Math.max(...vals) + 1);
+    const X = p => L + (W - L - R) * (t(p) - t0) / (t1 - t0), Y = v => T + (H - T - B) * (hi - v) / (hi - lo);
+    let s = '<svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Évolution du poids">';
+    for (let i = 0; i <= 3; i++) { const v = lo + (hi - lo) * i / 3, y = Y(v); s += '<line x1="' + L + '" x2="' + (W - R) + '" y1="' + y.toFixed(1) + '" y2="' + y.toFixed(1) + '" stroke="var(--line)"/><text x="' + (L - 6) + '" y="' + (y + 3).toFixed(1) + '" text-anchor="end">' + n1(v) + '</text>'; }
+    if (goal && goal >= lo && goal <= hi) s += '<line x1="' + L + '" x2="' + (W - R) + '" y1="' + Y(goal).toFixed(1) + '" y2="' + Y(goal).toFixed(1) + '" stroke="var(--ink)" stroke-dasharray="5 5" stroke-width="1.5" opacity=".55"/><text class="lbl" x="' + (W - R) + '" y="' + (Y(goal) - 6).toFixed(1) + '" text-anchor="end">Objectif ' + n1(goal) + ' kg</text>';
+    if (pts.length > 1) s += '<path d="' + pts.map((p, i) => (i ? 'L' : 'M') + X(p).toFixed(1) + ' ' + Y(+p.kg).toFixed(1)).join('') + '" fill="none" stroke="var(--brand)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>';
+    pts.forEach((p, i) => {
+      const lastP = i === pts.length - 1;
+      if (pts.length <= 40 || lastP) s += '<circle cx="' + X(p).toFixed(1) + '" cy="' + Y(+p.kg).toFixed(1) + '" r="4" fill="var(--brand)" stroke="var(--surface)" stroke-width="2"/>';
+      s += '<circle cx="' + X(p).toFixed(1) + '" cy="' + Y(+p.kg).toFixed(1) + '" r="12" fill="transparent" data-tip="' + esc(dayFR(p.date) + ' : ' + n1(p.kg) + ' kg') + '"/>';
+    });
+    const lp = pts[pts.length - 1];
+    s += '<text class="lbl" x="' + Math.min(X(lp), W - R).toFixed(1) + '" y="' + (Y(+lp.kg) - 10).toFixed(1) + '" text-anchor="end">' + n1(lp.kg) + ' kg</text>';
+    s += '<text x="' + L + '" y="' + (H - 6) + '">' + ddmm(pts[0].date) + '</text><text x="' + (W - R) + '" y="' + (H - 6) + '" text-anchor="end">' + ddmm(lp.date) + '</text>';
+    return '<div class="chart">' + s + '</svg></div>';
+  }
+  function kcalSVG(days, byDay, goal) {
+    const W = chartW(), H = 190, L = 40, R = 10, T = 16, B = 24, n = days.length, slot = (W - L - R) / n, bw = Math.max(4, Math.min(16, slot - 2));
+    const vals = days.map(x => byDay[x] ? byDay[x].kcal : 0);
+    const hi = Math.max(goal || 0, ...vals) * 1.12 || 1;
+    const Y = v => T + (H - T - B) * (1 - v / hi);
+    let s = '<svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Calories par jour">';
+    [0, 0.5, 1].forEach(f => { const v = Math.round(hi * f / 100) * 100, y = Y(v); s += '<line x1="' + L + '" x2="' + (W - R) + '" y1="' + y.toFixed(1) + '" y2="' + y.toFixed(1) + '" stroke="var(--line)"/><text x="' + (L - 6) + '" y="' + (y + 3).toFixed(1) + '" text-anchor="end">' + fk(v) + '</text>'; });
+    days.forEach((x, i) => {
+      const v = vals[i], cx = L + slot * i + slot / 2;
+      if (v > 0) { const h = Math.max(3, (H - T - B) * v / hi); s += '<path d="M' + (cx - bw / 2).toFixed(1) + ' ' + (H - B) + 'v' + (-(h - 3)).toFixed(1) + 'a3 3 0 0 1 3 -3h' + (bw - 6).toFixed(1) + 'a3 3 0 0 1 3 3v' + (h - 3).toFixed(1) + 'z" fill="var(--brand)"/>'; }
+      s += '<rect x="' + (L + slot * i).toFixed(1) + '" y="' + T + '" width="' + slot.toFixed(1) + '" height="' + (H - T - B) + '" fill="transparent" data-tip="' + esc(dayFR(x) + ' : ' + (v ? fk(v) + ' kcal' : 'rien noté')) + '" data-jd="' + x + '"/>';
+      if (i % 5 === 0 || i === n - 1) s += '<text x="' + cx.toFixed(1) + '" y="' + (H - 7) + '" text-anchor="middle">' + ddmm(x) + '</text>';
+    });
+    if (goal) s += '<line x1="' + L + '" x2="' + (W - R) + '" y1="' + Y(goal).toFixed(1) + '" y2="' + Y(goal).toFixed(1) + '" stroke="var(--ink)" stroke-dasharray="5 5" stroke-width="1.5" opacity=".55" pointer-events="none"/><text class="lbl" x="' + (W - R) + '" y="' + (Y(goal) - 5).toFixed(1) + '" text-anchor="end" pointer-events="none">Objectif ' + fk(goal) + '</text>';
+    return '<div class="chart">' + s + '</svg></div>';
+  }
+  function hbar(label, v, goal, unit) {
+    const pct = goal ? Math.min(100, v / goal * 100) : 0;
+    return '<div class="hb"><div class="hb-top"><span>' + label + '</span><b>' + fk(v) + (goal ? ' / ' + fk(goal) : '') + ' ' + unit + '</b></div><div class="hb-track"><i style="width:' + pct.toFixed(1) + '%"></i></div></div>';
+  }
+
+  /* Liste des comptes */
+  function usersHTML() {
+    if (current) return '<div id="upage"><div class="loading"><div class="spin"></div>Chargement…</div></div>';
+    const f = [['all', 'Tous'], ['active', 'Actifs 7 j'], ['new', 'Nouveaux'], ['inactive', 'Inactifs 14 j'], ['flagged', 'Signalés'], ['banned', 'Bloqués'], ['nobackup', 'Sans sauvegarde']];
+    return '<section class="panel">' +
+      '<div class="ulist-top"><div class="searchbox"><svg class="ic sm"><use href="#i-search"/></svg><input id="q" type="search" placeholder="Nom ou e-mail" autocomplete="off" aria-label="Rechercher un compte"></div>' +
+      '<div class="acts"><button class="btn outline" data-x="exportAll"><svg class="ic sm"><use href="#i-download"/></svg>Exporter tous les comptes</button>' +
+      '<button class="btn outline" data-x="restoreAll"><svg class="ic sm"><use href="#i-upload"/></svg>Restaurer une sauvegarde complète</button></div></div>' +
+      '<div id="restoreAllBox"></div>' +
+      '<div class="filters" style="padding:0">' + f.map(x => '<button data-f="' + x[0] + '"' + (ufilter === x[0] ? ' class="on"' : '') + '>' + x[1] + '</button>').join('') + '</div>' +
+      '<div id="list" class="ulist"></div></section>';
+  }
   function renderList() {
     const el = $('#list'); if (!el) return;
     const q = ($('#q') && $('#q').value.trim().toLowerCase()) || '';
-    const d7 = Date.now() - 7 * 864e5;
+    const d7 = Date.now() - 7 * 864e5, d14 = Date.now() - 14 * 864e5;
+    const lastSeen = u => new Date(u.updated_at || u.last_sign_in_at || u.created_at || 0);
     const list = users.filter(u => {
       if (q && !(String(u.name || '') + ' ' + String(u.email || '')).toLowerCase().includes(q)) return false;
-      if (ufilter === 'active') return new Date(u.updated_at || u.last_sign_in_at || 0) > d7;
+      if (ufilter === 'active') return lastSeen(u) > d7;
       if (ufilter === 'new') return new Date(u.created_at) > d7;
+      if (ufilter === 'inactive') return lastSeen(u) < d14;
       if (ufilter === 'flagged') return u.flagged;
       if (ufilter === 'banned') return isBanned(u);
       if (ufilter === 'nobackup') return !u.updated_at;
       return true;
     });
-    el.innerHTML = list.length ? list.map(u =>
-      '<button class="u' + (u.id === current ? ' on' : '') + '" data-u="' + esc(u.id) + '"><span class="av">' + esc((u.name || u.email || '?').charAt(0).toUpperCase()) + '</span>' +
-      '<span class="min0"><b>' + esc(u.name || u.email || 'Sans nom') + '</b><small>' + esc(u.email || '') + ' · ' + pl(u.entries_count || 0, 'aliment') + '</small></span>' +
-      '<span class="when">' + esc(ago(u.updated_at || u.last_sign_in_at || u.created_at)) +
-      (isBanned(u) ? '<span class="chip2 red">Bloqué</span>' : u.flagged ? '<span class="chip2 orange">Signalé</span>' : u.provider === 'google' ? '<span class="chip2">Google</span>' : '') + '</span></button>').join('')
-      : '<p class="empty-d">' + (users.length ? 'Aucun compte ne correspond.' : 'Aucun compte pour l’instant.') + '</p>';
+    el.innerHTML = list.length ? '<div class="urow head" aria-hidden="true"><span></span><span>Compte</span><span>Suivi</span><span>Poids</span><span>Dernière activité</span></div>' + list.map(u => {
+      const dk = u.first_kg != null && u.last_kg != null ? u.last_kg - u.first_kg : null;
+      return '<button class="urow" data-u="' + esc(u.id) + '"><span class="av">' + esc((u.name || u.email || '?').charAt(0).toUpperCase()) + '</span>' +
+        '<span class="min0"><b>' + esc(u.name || u.email || 'Sans nom') + '</b><small>' + esc(u.name ? u.email : (u.provider === 'google' ? 'Compte Google' : 'Compte e-mail')) + '</small>' +
+        '<span class="tags">' + (isBanned(u) ? '<span class="chip2 red">Bloqué</span>' : '') + (u.flagged ? '<span class="chip2 orange">Signalé</span>' : '') + (u.provider === 'google' ? '<span class="chip2">Google</span>' : '') + (!u.updated_at ? '<span class="chip2">Sans sauvegarde</span>' : '') + '</span></span>' +
+        '<span class="ucol"><b>' + pl(u.days_tracked || 0, 'jour') + '</b><small>' + pl(u.entries_count || 0, 'aliment') + '</small></span>' +
+        '<span class="ucol"><b>' + (u.last_kg != null ? kg(u.last_kg) : '—') + '</b><small>' + (dk != null && Math.abs(dk) >= 0.05 ? sgn(dk) + ' kg depuis le début' : u.last_kg != null ? 'stable' : 'pas de pesée') + (u.goal_kg ? ' · objectif ' + n1(u.goal_kg) : '') + '</small></span>' +
+        '<span class="ucol"><b>' + esc(ago(lastSeen(u))) + '</b><small>' + (u.last_day ? 'dernier repas noté ' + dayFR(u.last_day, { day: 'numeric', month: 'short' }) : 'aucun repas noté') + '</small></span></button>';
+    }).join('') : '<p class="empty-d">' + (users.length ? 'Aucun compte ne correspond.' : 'Aucun compte pour l’instant.') + '</p>';
   }
-  async function openUser(id, quiet) {
-    current = id; renderList();
-    const box = $('#detail'); if (!box) return;
-    const u = userById(id); if (!u) { box.innerHTML = '<p class="empty-d">Compte introuvable.</p>'; return; }
-    if (!quiet) box.innerHTML = '<div class="loading"><div class="spin"></div>Chargement…</div>';
+
+  /* Page d'un utilisateur */
+  async function openUser(id, keepTab) {
+    if (current !== id) { current = id; if (!keepTab) { utab = 'progress'; jday = null; } }
+    if (view !== 'users' || !$('#upage')) { view = 'users'; render(); return; }
+    const page = $('#upage');
+    const u = userById(id); if (!u) { current = null; render(); return; }
     let b = null, hist = [];
     try {
       const r = await Promise.all([
@@ -213,67 +304,165 @@
         C.req('/rest/v1/backup_history?select=id,saved_at,entries_count&user_id=eq.' + id + '&order=saved_at.desc', { auth: true }).catch(() => [])
       ]);
       b = r[0] && r[0][0]; hist = r[1] || [];
-    } catch (e) { box.innerHTML = '<p class="empty-d">' + esc(e.message) + '</p>'; return; }
-    if (current !== id) return;
-    const d = (b && b.data) || {}, P = d.profile || {}, G = d.goals || {};
-    const entries = (d.entries || []).slice().sort((a, c) => (c.date + String(c.ts || 0)).localeCompare(a.date + String(a.ts || 0)));
-    const daysN = new Set((d.entries || []).map(e => e.date)).size;
-    const w = (d.weights || []).slice(-1)[0];
-    const uev = eventsOf(id);
-    const uerr = uev.filter(e => ERR_TYPES.includes(e.type));
+    } catch (e) { page.innerHTML = '<p class="empty-d">' + esc(e.message) + '</p>'; return; }
+    if (current !== id || !page.isConnected) return;
+    ucache = { id, u, b, hist, d: (b && b.data) || {}, st: stats((b && b.data) || {}) };
+    if (!jday) jday = ucache.st.days[ucache.st.days.length - 1] || day(Date.now());
+    renderUser();
+  }
+  function renderUser() {
+    const page = $('#upage'); if (!page || !ucache) return;
+    const tp = document.getElementById('tip'); if (tp) tp.hidden = true;
+    const { u, b, d, st } = ucache, P = d.profile || {}, G = d.goals || {};
     const banned = isBanned(u);
-    box.dataset.uid = id; box._b = b;
-    box.innerHTML =
-      '<div><h2 class="big">' + esc(u.name || P.name || u.email) + '</h2><p class="hint">' + esc(u.email || '') + '</p>' +
-      '<div class="tags" style="margin-top:8px"><span class="chip2' + (u.provider === 'google' ? '' : '') + '">' + (u.provider === 'google' ? 'Compte Google' : 'Compte e-mail') + '</span>' +
-      (banned ? '<span class="chip2 red">Bloqué</span>' : '<span class="chip2 green">Actif</span>') + (u.flagged ? '<span class="chip2 orange">Signalé</span>' : '') + '</div></div>' +
-      '<div class="acts">' +
-      '<button class="btn ' + (banned ? 'primary' : 'outline') + '" data-a="ban">' + (banned ? 'Débloquer le compte' : 'Bloquer le compte') + '</button>' +
-      (u.provider !== 'google' ? '<button class="btn outline" data-a="reset">Envoyer un lien de mot de passe</button>' : '') +
-      '<button class="btn danger" data-a="deluser"><svg class="ic sm"><use href="#i-trash"/></svg>Supprimer le compte</button></div>' +
-      '<div class="sec"><h3>Compte</h3>' +
-      '<div class="kv"><span>Inscription</span><b>' + esc(dt(u.created_at)) + '</b></div>' +
-      '<div class="kv"><span>Dernière connexion</span><b>' + esc(dt(u.last_sign_in_at)) + '</b></div>' +
-      '<div class="kv"><span>Dernière sauvegarde</span><b>' + esc(dt(u.updated_at)) + '</b></div>' +
-      '<div class="kv"><span>Accord sauvegarde</span><b>' + esc(u.consent_at ? dt(u.consent_at) : 'non enregistré') + '</b></div>' +
-      (uev.length ? '<div class="kv"><span>Appareils</span><b>' + esc([...new Set(uev.map(e => device(e.ua)))].join(', ')) + '</b></div>' : '') + '</div>' +
-      '<div class="sec"><h3>Note privée</h3><textarea id="uNote" placeholder="Visible seulement par toi">' + esc(u.note || '') + '</textarea>' +
-      '<div class="acts" style="margin-top:8px"><label class="check" style="flex:1;align-items:center"><input type="checkbox" id="uFlag"' + (u.flagged ? ' checked' : '') + '><span>Signaler ce compte</span></label><button class="btn primary mbtn" data-a="note">Enregistrer</button></div></div>' +
-      '<div class="sec"><h3>Lui écrire</h3><div class="field"><input id="mTitle" type="text" placeholder="Titre"></div><textarea id="mBody" placeholder="Message affiché dans son appli à la prochaine ouverture" style="margin-top:8px"></textarea>' +
-      '<div class="acts" style="margin-top:8px"><button class="btn primary mbtn" data-a="msg">Envoyer</button></div></div>' +
-      (b ? '<div class="mini"><div><b>' + fk(entries.length) + '</b><span>aliments notés</span></div><div><b>' + fk(daysN) + '</b><span>jours suivis</span></div>' +
-        '<div><b>' + (w ? String(w.kg).replace('.', ',') + ' kg' : '—') + '</b><span>dernier poids</span></div><div><b>' + fk(uev.length) + '</b><span>événements (30 j)</span></div></div>' +
-        '<div class="sec"><h3>Objectifs</h3><div class="grid2" style="grid-template-columns:repeat(auto-fit,minmax(90px,1fr))">' +
+    const a7 = st.last(7), dk = st.first && st.lastW ? st.lastW.kg - st.first.kg : null;
+    page.innerHTML =
+      '<button class="back" data-x="back">← Tous les utilisateurs</button>' +
+      '<section class="panel uhead"><div class="uid"><span class="av big">' + esc((u.name || P.name || u.email || '?').charAt(0).toUpperCase()) + '</span>' +
+      '<div class="min0"><h2 class="big">' + esc(u.name || P.name || u.email) + '</h2><p class="hint">' + esc(u.email || '') + ' · inscrit ' + esc(ago(u.created_at)) + '</p>' +
+      '<div class="tags"><span class="chip2">' + (u.provider === 'google' ? 'Compte Google' : 'Compte e-mail') + '</span>' + (banned ? '<span class="chip2 red">Bloqué</span>' : '<span class="chip2 green">Actif</span>') + (u.flagged ? '<span class="chip2 orange">Signalé</span>' : '') + (P.goal ? '<span class="chip2">' + esc(GOAL_TXT[P.goal] || P.goal) + '</span>' : '') + '</div></div></div>' +
+      '<div class="acts"><button class="btn primary" data-a="dl"' + (b ? '' : ' disabled') + '><svg class="ic sm"><use href="#i-download"/></svg>Exporter ses données</button>' +
+      '<button class="btn outline" data-a="csv"' + (b ? '' : ' disabled') + '>Journal en tableur (CSV)</button>' +
+      '<button class="btn outline" data-ut="backups"><svg class="ic sm"><use href="#i-upload"/></svg>Restaurer</button></div>' +
+      '<div class="mini">' +
+      '<div><b>' + fk(st.days.length) + '</b><span>jours suivis</span></div>' +
+      '<div><b>' + pl(st.cur, 'jour') + '</b><span>série en cours (record ' + st.best + ')</span></div>' +
+      '<div><b>' + kg(st.lastW && st.lastW.kg) + '</b><span>' + (dk != null && st.w.length > 1 ? sgn(dk) + ' kg depuis le ' + ddmm(st.first.date) : 'poids actuel') + '</span></div>' +
+      '<div><b>' + (a7.length ? fk(st.avg(a7, 'kcal')) : '—') + '</b><span>kcal / jour (7 j) · objectif ' + fk(G.kcal) + '</span></div>' +
+      '<div><b>' + esc(ago(u.updated_at || u.last_sign_in_at)) + '</b><span>dernière activité</span></div></div></section>' +
+      '<nav class="nav sub" aria-label="Sections du compte">' + UTABS.map(t => '<button data-ut="' + t[0] + '"' + (utab === t[0] ? ' class="on"' : '') + '>' + t[1] + '</button>').join('') + '</nav>' +
+      '<div id="utab">' + (b || utab === 'account' || utab === 'activity' || utab === 'backups' ? tabHTML() : '<section class="panel"><p class="empty-d">Pas encore de sauvegarde pour ce compte : il n’a rien enregistré en ligne.</p></section>') + '</div>';
+  }
+  function tabHTML() {
+    const { u, b, hist, d, st } = ucache, P = d.profile || {}, G = d.goals || {};
+    if (utab === 'progress') {
+      const today = day(Date.now()), days30 = Array.from({ length: 30 }, (_, i) => addDays(today, i - 29));
+      const l30 = st.last(30), inGoal = l30.filter(x => G.kcal && Math.abs(st.byDay[x].kcal - G.kcal) <= G.kcal * 0.1).length;
+      const weeks = Array.from({ length: 8 }, (_, i) => addDays(today, -7 * (7 - i)));
+      const wk = weeks.map(w0 => st.days.filter(x => x > w0 && x <= addDays(w0, 7)).length);
+      const water = Object.entries(d.water || {}).filter(([k]) => k > addDays(today, -30)).map(([, v]) => +v || 0);
+      const ex30 = (d.exercises || []).filter(x => x.date > addDays(today, -30));
+      const goalKg = P.goalWeight ? +P.goalWeight : null;
+      const left = goalKg && st.lastW ? st.lastW.kg - goalKg : null;
+      return '<div class="two">' +
+        '<section class="panel"><h2>Poids</h2>' + (st.w.length ? weightSVG(st.w, goalKg) +
+          '<div class="mini"><div><b>' + kg(st.first.kg) + '</b><span>départ (' + ddmm(st.first.date) + ')</span></div><div><b>' + kg(st.lastW.kg) + '</b><span>actuel (' + ddmm(st.lastW.date) + ')</span></div>' +
+          '<div><b>' + (st.w.length > 1 ? sgn(st.lastW.kg - st.first.kg) + ' kg' : '—') + '</b><span>évolution</span></div><div><b>' + (left != null ? (Math.abs(left) < 0.05 ? 'Atteint' : n1(Math.abs(left)) + ' kg') : '—') + '</b><span>' + (goalKg ? 'reste vers ' + n1(goalKg) + ' kg' : 'pas d’objectif de poids') + '</span></div></div>'
+          : '<p class="hint">Aucune pesée enregistrée.</p>') + '</section>' +
+        '<section class="panel"><h2>Calories des 30 derniers jours</h2>' + kcalSVG(days30, st.byDay, G.kcal) +
+          '<div class="mini"><div><b>' + (l30.length ? fk(st.avg(l30, 'kcal')) : '—') + '</b><span>kcal en moyenne (jours notés)</span></div><div><b>' + l30.length + ' / 30</b><span>jours notés</span></div>' +
+          '<div><b>' + (l30.length ? inGoal : '—') + '</b><span>jours dans l’objectif (±10 %)</span></div></div><p class="hint">Touche une barre pour ouvrir ce jour dans le journal.</p></section></div>' +
+        '<div class="two"><section class="panel"><h2>Moyennes sur 30 jours</h2>' +
+          hbar('Protéines', st.avg(l30, 'p'), G.p, 'g') + hbar('Glucides', st.avg(l30, 'c'), G.c, 'g') + hbar('Lipides', st.avg(l30, 'f'), G.f, 'g') +
+          hbar('Eau', water.length ? water.reduce((a, x) => a + x, 0) / water.length : 0, G.water, 'ml') +
+          '<p class="hint">' + pl(ex30.length, 'activité') + ' sportive' + (ex30.length > 1 ? 's' : '') + ' · ' + fk(ex30.reduce((a, x) => a + (+x.kcal || 0), 0)) + ' kcal brûlées sur 30 jours</p></section>' +
+        '<section class="panel"><h2>Régularité (8 dernières semaines)</h2>' + barsSVG(weeks.map(w0 => addDays(w0, 1)), wk, 'var(--brand)', 'Jours notés par semaine') +
+          '<p class="hint">Nombre de jours notés chaque semaine (sur 7). Série en cours : ' + pl(st.cur, 'jour') + ', record : ' + pl(st.best, 'jour') + '.</p></section></div>';
+    }
+    if (utab === 'journal') {
+      const ents = (d.entries || []).filter(e => e.date === jday).sort((a, c) => (a.ts || 0) - (c.ts || 0));
+      const tot = st.byDay[jday] || { kcal: 0, p: 0, c: 0, f: 0, n: 0 };
+      const ex = exByDay(d)[jday] || [], wt = (d.weights || []).find(w => w.date === jday), water = +(d.water || {})[jday] || 0;
+      const all = st.days.slice().reverse().slice(0, 120);
+      return '<section class="panel"><div class="daynav"><button class="btn outline mbtn" data-jd="' + addDays(jday, -1) + '" aria-label="Jour précédent">‹</button>' +
+        '<input type="date" id="jdIn" value="' + esc(jday) + '" aria-label="Choisir un jour"><button class="btn outline mbtn" data-jd="' + addDays(jday, 1) + '" aria-label="Jour suivant">›</button>' +
+        '<h2 class="dayname">' + esc(dayFR(jday, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })) + '</h2></div>' +
+        '<div class="mini"><div><b>' + fk(tot.kcal) + '</b><span>kcal · objectif ' + fk(G.kcal) + '</span></div><div><b>' + fk(tot.p) + ' g</b><span>protéines</span></div><div><b>' + fk(tot.c) + ' g</b><span>glucides</span></div><div><b>' + fk(tot.f) + ' g</b><span>lipides</span></div>' +
+        '<div><b>' + (water ? n1(water / 1000) + ' L' : '—') + '</b><span>eau</span></div><div><b>' + (wt ? kg(wt.kg) : '—') + '</b><span>pesée</span></div></div>' +
+        (ents.length ? MEALS.map(([m, label]) => {
+          const list = ents.filter(e => (e.meal || 'snack') === m); if (!list.length) return '';
+          return '<div class="sec"><h3>' + label + ' · ' + fk(list.reduce((a, e) => a + (+e.kcal || 0), 0)) + ' kcal</h3><div class="tbl"><table><thead><tr><th>Aliment</th><th class="num">kcal</th><th class="num">Prot.</th><th class="num">Gluc.</th><th class="num">Lip.</th></tr></thead><tbody>' +
+            list.map(e => '<tr><td class="food">' + esc(e.name) + (e.pending ? ' <span class="chip2 orange">scanné hors ligne</span>' : '') + '<small>' + esc([e.brand, e.key === 'quick' ? 'ajout rapide' : n1(e.amount) + ' ' + (e.unit || 'g') + (e.grams && e.unit !== 'g' && e.unit !== 'ml' ? ' (' + fk(e.grams) + ' g)' : '')].filter(Boolean).join(' · ')) + '</small></td><td class="num">' + fk(e.kcal) + '</td><td class="num">' + fk(e.p) + ' g</td><td class="num">' + fk(e.c) + ' g</td><td class="num">' + fk(e.f) + ' g</td></tr>').join('') +
+            '</tbody></table></div></div>';
+        }).join('') : '<p class="empty-d">Rien de noté ce jour-là.</p>') +
+        (ex.length ? '<div class="sec"><h3>Activités</h3>' + ex.map(x => '<div class="kv"><span>' + esc(x.name || 'Activité') + (x.minutes ? ' · ' + x.minutes + ' min' : '') + '</span><b>−' + fk(x.kcal) + ' kcal</b></div>').join('') + '</div>' : '') + '</section>' +
+        '<section class="panel"><h2>Tous les jours notés</h2>' + (all.length ? '<div class="tbl"><table class="click"><thead><tr><th>Jour</th><th class="num">kcal</th><th class="num">Prot.</th><th class="num">Gluc.</th><th class="num">Lip.</th><th class="num">Eau</th></tr></thead><tbody>' +
+          all.map(x => { const t = st.byDay[x], wa = +(d.water || {})[x] || 0; return '<tr data-jd="' + x + '"' + (x === jday ? ' class="on"' : '') + '><td class="nw">' + esc(dayFR(x, { weekday: 'short' }) + ' ' + ddmm(x) + (x.slice(0, 4) !== day(Date.now()).slice(0, 4) ? '/' + x.slice(2, 4) : '')) + '</td><td class="num">' + fk(t.kcal) + '</td><td class="num">' + fk(t.p) + ' g</td><td class="num">' + fk(t.c) + ' g</td><td class="num">' + fk(t.f) + ' g</td><td class="num">' + (wa ? n1(wa / 1000) + ' L' : '—') + '</td></tr>'; }).join('') +
+          '</tbody></table></div>' + (st.days.length > 120 ? '<p class="hint">Les 120 derniers jours sont affichés ; l’export contient tout.</p>' : '') : '<p class="hint">Aucun jour noté.</p>') + '</section>';
+    }
+    if (utab === 'data') {
+      const prods = Object.values(d.products || {}), mine = prods.filter(p => p && (p.source === 'custom' || p.manual));
+      const pname = k => { const p = (d.products || {})[k]; return p ? p.name : String(k).replace(/^gen-/, '').replace(/-/g, ' '); };
+      const wr = d.warn || {};
+      return '<div class="two"><section class="panel"><h2>Profil</h2>' + (d.profile ? [
+          ['Prénom', P.name], ['Sexe', P.sex === 'f' ? 'Femme' : P.sex === 'm' ? 'Homme' : ''], ['Âge', P.age ? P.age + ' ans' : ''], ['Taille', P.height ? P.height + ' cm' : ''],
+          ['Poids au départ', P.weight ? kg(P.weight) : ''], ['Objectif', GOAL_TXT[P.goal] || ''], ['Poids visé', P.goalWeight ? kg(P.goalWeight) : ''],
+          ['Rythme', P.rate ? n1(P.rate) + ' kg / semaine' : ''], ['Activité', ACT_TXT[P.activity] || P.activity || '']
+        ].filter(x => x[1]).map(x => '<div class="kv"><span>' + x[0] + '</span><b>' + esc(x[1]) + '</b></div>').join('') : '<p class="hint">Profil pas rempli (il a passé le questionnaire).</p>') + '</section>' +
+        '<section class="panel"><h2>Objectifs</h2><div class="grid2" style="grid-template-columns:repeat(auto-fit,minmax(90px,1fr))">' +
         [['kcal', 'kcal'], ['p', 'Prot. (g)'], ['c', 'Gluc. (g)'], ['f', 'Lip. (g)'], ['water', 'Eau (ml)']].map(x => '<div class="field"><label for="g_' + x[0] + '">' + x[1] + '</label><input id="g_' + x[0] + '" inputmode="numeric" value="' + esc(G[x[0]] != null ? Math.round(G[x[0]]) : '') + '"></div>').join('') +
-        '</div><div class="acts" style="margin-top:8px"><button class="btn primary mbtn" data-a="goals">Modifier ses objectifs</button></div></div>' +
-        (P.goal ? '<div class="sec"><h3>Profil</h3><div class="kv"><span>Infos</span><b>' + esc([P.sex === 'f' ? 'Femme' : 'Homme', P.age ? P.age + ' ans' : '', P.height ? P.height + ' cm' : '', P.goal === 'lose' ? 'veut perdre du poids' : P.goal === 'gain' ? 'veut prendre du muscle' : 'veut garder son poids'].filter(Boolean).join(' · ')) + '</b></div></div>' : '') +
-        '<div class="acts"><button class="btn outline" data-a="dl"><svg class="ic sm"><use href="#i-download"/></svg>Télécharger ses données</button>' +
-        '<button class="btn outline" data-a="up"><svg class="ic sm"><use href="#i-upload"/></svg>Restaurer depuis un fichier</button>' +
-        '<button class="btn danger" data-a="delbackup">Effacer sa sauvegarde</button></div>' +
-        '<div class="sec"><h3>Derniers aliments</h3>' + (entries.length ? '<div class="tbl"><table><thead><tr><th>Date</th><th>Aliment</th><th class="num">Quantité</th><th class="num">kcal</th></tr></thead><tbody>' +
-          entries.slice(0, 15).map(e => '<tr><td>' + esc(String(e.date || '').slice(8) + '/' + String(e.date || '').slice(5, 7)) + '</td><td class="wrap">' + esc(e.name) + '</td><td class="num">' + (e.key === 'quick' ? '—' : fk(e.grams) + ' ' + esc(e.unit || 'g')) + '</td><td class="num">' + fk(e.kcal) + '</td></tr>').join('') +
-          '</tbody></table></div>' : '<p class="hint">Aucun aliment noté.</p>') + '</div>' +
-        '<div class="sec"><h3>Versions précédentes</h3>' + (hist.length ? hist.map(h =>
-          '<div class="ver"><span>' + esc(dt(h.saved_at)) + ' · ' + pl(h.entries_count, 'aliment') + '</span><button class="btn outline" data-a="vdl" data-v="' + h.id + '">Télécharger</button><button class="btn outline" data-a="vrs" data-v="' + h.id + '">Restaurer</button></div>').join('')
-          : '<p class="hint">Une version est gardée toutes les 6 heures au maximum (30 au total).</p>') + '</div>'
-        : '<p class="hint">Pas encore de sauvegarde pour ce compte.</p>') +
-      '<div class="sec"><h3>Erreurs de ce compte (30 j)</h3>' + (uerr.length ? '<div class="feed">' + uerr.slice(0, 15).map(evRow).join('') + '</div>' : '<p class="hint">Aucune erreur.</p>') + '</div>' +
-      '<div class="sec"><h3>Activité (30 j)</h3>' + (uev.length ? '<div class="feed">' + uev.slice(0, 30).map(evRow).join('') + '</div>' : '<p class="hint">Aucune activité enregistrée (ou suivi refusé).</p>') + '</div>';
+        '</div><div class="acts"><button class="btn primary mbtn" data-a="goals">Modifier ses objectifs</button></div><p class="hint">Il recevra les nouveaux objectifs à sa prochaine ouverture de l’appli.</p></section></div>' +
+        '<div class="two"><section class="panel"><h2>Ses aliments créés <span class="chip2">' + mine.length + '</span></h2>' + (mine.length ? '<div class="tbl"><table><thead><tr><th>Aliment</th><th class="num">kcal / 100</th><th class="num">P</th><th class="num">G</th><th class="num">L</th></tr></thead><tbody>' +
+          mine.map(p => { const c = p.per100 || {}; return '<tr><td class="wrap">' + esc(p.name) + (p.code ? ' <small class="hint">' + esc(p.code) + '</small>' : '') + '</td><td class="num">' + fk(c.kcal) + '</td><td class="num">' + n1(c.p) + '</td><td class="num">' + n1(c.c) + '</td><td class="num">' + n1(c.f) + '</td></tr>'; }).join('') + '</tbody></table></div>' : '<p class="hint">Aucun.</p>') + '</section>' +
+        '<section class="panel"><h2>Favoris et réglages</h2>' + ((d.favorites || []).length ? '<div class="tags">' + d.favorites.map(k => '<span class="chip2">' + esc(pname(k)) + '</span>').join('') + '</div>' : '<p class="hint">Pas de favori.</p>') +
+          '<div class="kv"><span>Produits gardés sur le téléphone</span><b>' + prods.length + '</b></div><div class="kv"><span>Thème</span><b>' + ({ auto: 'Automatique', light: 'Clair', dark: 'Sombre' }[d.theme] || '—') + '</b></div>' +
+          '<div class="kv"><span>Avertissements d’ingrédients</span><b>' + (wr.on === false ? 'Désactivés' : 'Activés') + '</b></div></section></div>';
+    }
+    if (utab === 'backups') {
+      return '<div class="two"><section class="panel"><h2>Sauvegarde actuelle</h2>' + (b ?
+          '<div class="kv"><span>Enregistrée</span><b>' + esc(dt(b.updated_at)) + '</b></div><div class="kv"><span>Par</span><b>' + (b.device === 'admin' ? 'toi (admin)' : 'son téléphone') + '</b></div>' +
+          '<div class="kv"><span>Contenu</span><b>' + pl((d.entries || []).length, 'aliment') + ' · ' + pl(st.days.length, 'jour') + ' · ' + pl(st.w.length, 'pesée') + '</b></div><div class="kv"><span>Taille</span><b>' + bytes(JSON.stringify(d).length) + '</b></div>' +
+          '<div class="acts"><button class="btn primary" data-a="dl"><svg class="ic sm"><use href="#i-download"/></svg>Exporter (JSON)</button><button class="btn outline" data-a="csv">Journal (CSV)</button></div>'
+          : '<p class="hint">Aucune sauvegarde en ligne pour l’instant.</p>') +
+        '<div class="sec"><h3>Restaurer</h3><p class="hint">Remplace sa sauvegarde par un fichier exporté (le sien, ou une sauvegarde complète de tous les comptes). L’ancienne version est gardée dans l’historique. Son téléphone lui proposera de récupérer les données à la prochaine ouverture.</p>' +
+          '<div class="acts" style="margin-top:8px"><button class="btn outline" data-a="up"><svg class="ic sm"><use href="#i-upload"/></svg>Restaurer depuis un fichier</button>' + (b ? '<button class="btn danger" data-a="delbackup">Effacer sa sauvegarde</button>' : '') + '</div></div></section>' +
+        '<section class="panel"><h2>Versions précédentes <span class="chip2">' + hist.length + '</span></h2>' + (hist.length ? hist.map(h =>
+          '<div class="ver"><span>' + esc(dt(h.saved_at)) + '<br><small class="hint">' + pl(h.entries_count, 'aliment') + '</small></span><button class="btn outline" data-a="vdl" data-v="' + h.id + '">Exporter</button><button class="btn outline" data-a="vrs" data-v="' + h.id + '">Restaurer</button></div>').join('')
+          : '<p class="hint">Une version est gardée automatiquement toutes les 6 heures au maximum (30 au total).</p>') + '</section></div>';
+    }
+    if (utab === 'account') {
+      const uev = eventsOf(u.id), msgs = messages.filter(m => m.user_id === u.id || !m.user_id);
+      const banned = isBanned(u);
+      return '<div class="two"><section class="panel"><h2>Compte</h2>' +
+        '<div class="kv"><span>E-mail</span><b>' + esc(u.email) + '</b></div><div class="kv"><span>Connexion</span><b>' + (u.provider === 'google' ? 'Google' : 'E-mail et mot de passe') + '</b></div>' +
+        '<div class="kv"><span>Inscription</span><b>' + esc(dt(u.created_at)) + '</b></div><div class="kv"><span>Dernière connexion</span><b>' + esc(dt(u.last_sign_in_at)) + '</b></div>' +
+        '<div class="kv"><span>Dernière sauvegarde</span><b>' + esc(dt(u.updated_at)) + '</b></div><div class="kv"><span>Accord sauvegarde en ligne</span><b>' + esc(u.consent_at ? dt(u.consent_at) : 'non enregistré') + '</b></div>' +
+        (uev.length ? '<div class="kv"><span>Appareils</span><b>' + esc([...new Set(uev.map(e => device(e.ua)))].join(', ')) + '</b></div>' : '') +
+        '<div class="kv"><span>Identifiant</span><b style="font-size:12px">' + esc(u.id) + '</b></div>' +
+        '<div class="acts"><button class="btn ' + (banned ? 'primary' : 'outline') + '" data-a="ban">' + (banned ? 'Débloquer le compte' : 'Bloquer le compte') + '</button>' +
+        (u.provider !== 'google' ? '<button class="btn outline" data-a="reset">Envoyer un lien de mot de passe</button>' : '') +
+        '<button class="btn danger" data-a="deluser"><svg class="ic sm"><use href="#i-trash"/></svg>Supprimer le compte</button></div></section>' +
+        '<section class="panel"><h2>Note privée</h2><textarea id="uNote" placeholder="Visible seulement par toi">' + esc(u.note || '') + '</textarea>' +
+        '<div class="acts"><label class="check" style="flex:1;align-items:center"><input type="checkbox" id="uFlag"' + (u.flagged ? ' checked' : '') + '><span>Signaler ce compte</span></label><button class="btn primary mbtn" data-a="note">Enregistrer</button></div>' +
+        '<h2 style="margin-top:8px">Lui écrire</h2><div class="field"><input id="mTitle" type="text" placeholder="Titre"></div><textarea id="mBody" placeholder="Message affiché dans son appli à la prochaine ouverture"></textarea>' +
+        '<div class="acts"><button class="btn primary mbtn" data-a="msg">Envoyer</button></div>' +
+        (msgs.length ? '<div class="sec"><h3>Messages reçus</h3>' + msgs.map(m => '<div class="kv"><span>' + esc(m.title) + (m.user_id ? '' : ' <small class="hint">(à tous)</small>') + '</span><b>' + (reads.some(r => r.message_id === m.id && r.user_id === u.id) ? 'Lu' : 'Pas encore lu') + '</b></div>').join('') + '</div>' : '') + '</section></div>';
+    }
+    const uev = eventsOf(u.id), uerr = uev.filter(e => ERR_TYPES.includes(e.type));
+    return '<div class="two"><section class="panel"><h2>Erreurs (30 j) <span class="chip2' + (uerr.length ? ' red' : ' green') + '">' + uerr.length + '</span></h2>' + (uerr.length ? '<div class="feed">' + uerr.slice(0, 30).map(evRow).join('') + '</div>' : '<p class="hint">Aucune erreur.</p>') + '</section>' +
+      '<section class="panel"><h2>Activité (30 j)</h2>' + (uev.length ? '<div class="feed">' + uev.slice(0, 80).map(evRow).join('') + '</div>' : '<p class="hint">Aucune activité enregistrée (suivi refusé ou appli pas encore ouverte).</p>') + '</section></div>';
   }
   function evRow(e) {
     const err = ERR_TYPES.includes(e.type);
     return '<div class="ev"><time>' + esc(short(e.created_at)) + '</time><div class="min0"><b' + (err ? ' style="color:var(--danger)"' : '') + '>' + esc(TYPE_LABEL[e.type] || e.type) + '</b>' +
       (view !== 'users' ? ' · ' + esc(who(e)) : '') + '<small>' + esc([evDetail(e), e.ua ? device(e.ua) : '', e.version ? 'v' + e.version : ''].filter(Boolean).join(' · ')) + '</small></div></div>';
   }
-  async function patchBackup(id, data, label) {
-    await C.req('/rest/v1/backups?user_id=eq.' + id, { method: 'PATCH', auth: true, headers: { Prefer: 'return=minimal' },
-      body: { data, entries_count: (data.entries || []).length, device: 'admin', updated_at: new Date().toISOString() } });
-    toast(label);
-    await loadAll();
+  function csvOf(d) {
+    const num = v => String(Math.round((+v || 0) * 10) / 10).replace('.', ',');
+    const q = v => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
+    const meal = Object.fromEntries(MEALS);
+    const rows = [['Date', 'Repas', 'Aliment', 'Marque', 'Quantité', 'Unité', 'Grammes', 'kcal', 'Protéines (g)', 'Glucides (g)', 'Lipides (g)']];
+    (d.entries || []).slice().sort((a, c) => (a.date + String(a.ts || 0)).localeCompare(c.date + String(c.ts || 0))).forEach(e => rows.push([e.date, meal[e.meal] || e.meal, e.name, e.brand, e.key === 'quick' ? '' : num(e.amount), e.key === 'quick' ? '' : e.unit, num(e.grams), num(e.kcal), num(e.p), num(e.c), num(e.f)]));
+    (d.weights || []).forEach(w => rows.push([w.date, 'Pesée', '', '', num(w.kg), 'kg', '', '', '', '', '']));
+    Object.entries(d.water || {}).forEach(([k, v]) => rows.push([k, 'Eau', '', '', num(v), 'ml', '', '', '', '', '']));
+    (d.exercises || []).forEach(x => rows.push([x.date, 'Activité', x.name, '', num(x.minutes), 'min', '', '-' + num(x.kcal), '', '', '']));
+    return '﻿' + rows.map(r => r.map(q).join(';')).join('\r\n');
   }
+  function downloadText(name, text, type) {
+    const blob = new Blob([text], { type });
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name;
+    document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+  }
+  // Écrit la sauvegarde d'un compte (crée la ligne si elle avait été effacée) ; l'ancienne version part dans l'historique
+  async function saveBackup(u, data, label, quiet) {
+    await C.req('/rest/v1/backups?on_conflict=user_id', { method: 'POST', auth: true, headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
+      body: { user_id: u.id, email: u.email, name: (data.profile && data.profile.name) || u.name || null, data, entries_count: (data.entries || []).length, device: 'admin', updated_at: new Date().toISOString() } });
+    if (!quiet) { toast(label); await loadAll(); }
+  }
+  const isState = x => x && typeof x === 'object' && Array.isArray(x.entries);
   async function onDetail(ev) {
-    const btn = ev.target.closest('[data-a]'); if (!btn) return;
-    const box = $('#detail'), id = box.dataset.uid, b = box._b, u = userById(id); if (!id || !u) return;
+    const btn = ev.target.closest('[data-a]'); if (!btn || !ucache) return;
+    const { id, u, b, d } = ucache;
     const a = btn.dataset.a;
     try {
       if (a === 'ban') {
@@ -283,7 +472,7 @@
       } else if (a === 'reset') { await C.recover(u.email, location.origin + location.pathname.replace(/admin\.html$/, '')); toast('Lien envoyé à ' + u.email); }
       else if (a === 'deluser') {
         if (!arm(btn, 'Appuie encore : suppression définitive')) return;
-        await rpc('admin_delete_user', { target: id }); current = null; toast('Compte supprimé'); await loadAll();
+        await rpc('admin_delete_user', { target: id }); current = null; ucache = null; toast('Compte supprimé'); await loadAll();
       } else if (a === 'note') {
         await C.req('/rest/v1/user_admin?on_conflict=user_id', { method: 'POST', auth: true, headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
           body: { user_id: id, note: $('#uNote').value, flagged: $('#uFlag').checked, updated_at: new Date().toISOString() } });
@@ -295,13 +484,14 @@
         toast('Message envoyé'); await loadAll();
       } else if (a === 'goals') {
         if (!b) return;
-        const data = JSON.parse(JSON.stringify(b.data || {}));
+        const data = JSON.parse(JSON.stringify(d));
         data.goals = Object.assign({}, data.goals || {});
         ['kcal', 'p', 'c', 'f', 'water'].forEach(k => { const v = parseFloat(String($('#g_' + k).value).replace(',', '.')); if (isFinite(v) && v >= 0) data.goals[k] = Math.round(v); });
         data.metaT = Date.now();
-        await patchBackup(id, data, 'Objectifs modifiés : il les recevra à sa prochaine ouverture');
-      } else if (a === 'dl') { if (b) download('nutriscan-' + slugName(u) + '-' + day(Date.now()) + '.json', b.data); }
-      else if (a === 'up') { $('#fileIn').dataset.uid = id; $('#fileIn').click(); }
+        await saveBackup(u, data, 'Objectifs modifiés : il les recevra à sa prochaine ouverture');
+      } else if (a === 'dl') { if (b) download('nutriscan-' + slugName(u) + '-' + day(Date.now()) + '.json', d); }
+      else if (a === 'csv') { if (b) downloadText('nutriscan-' + slugName(u) + '-journal-' + day(Date.now()) + '.csv', csvOf(d), 'text/csv;charset=utf-8'); }
+      else if (a === 'up') { $('#fileIn').dataset.mode = 'user'; $('#fileIn').click(); }
       else if (a === 'delbackup') {
         if (!arm(btn, 'Appuie encore pour effacer')) return;
         await C.req('/rest/v1/backups?user_id=eq.' + id, { method: 'DELETE', auth: true, headers: { Prefer: 'return=minimal' } });
@@ -310,9 +500,30 @@
         const r = await C.req('/rest/v1/backup_history?select=data,saved_at&id=eq.' + btn.dataset.v, { auth: true });
         if (!r || !r[0]) { toast('Version introuvable'); return; }
         if (a === 'vdl') download('nutriscan-' + slugName(u) + '-version-' + day(r[0].saved_at) + '.json', r[0].data);
-        else { if (!arm(btn, 'Confirmer ?')) return; await patchBackup(id, r[0].data, 'Version du ' + dt(r[0].saved_at) + ' restaurée'); }
+        else { if (!arm(btn, 'Confirmer ?')) return; await saveBackup(u, r[0].data, 'Version du ' + dt(r[0].saved_at) + ' restaurée'); }
       }
     } catch (e) { toast(e.message); }
+  }
+  async function exportAll() {
+    const rows = await C.req('/rest/v1/backups?select=user_id,email,name,data,entries_count,device,updated_at', { auth: true });
+    const out = { app: 'NutriScan', exported_at: new Date().toISOString(), accounts: users.length, users: (rows || []).map(r => Object.assign({}, r, { account: userById(r.user_id) ? { email: userById(r.user_id).email, created_at: userById(r.user_id).created_at, provider: userById(r.user_id).provider } : null })) };
+    download('nutriscan-tous-les-comptes-' + day(Date.now()) + '.json', out);
+    toast(pl(out.users.length, 'sauvegarde') + ' exportée' + (out.users.length > 1 ? 's' : ''));
+  }
+  function showRestoreAll(file) {
+    const box = $('#restoreAllBox'); if (!box) return;
+    const list = (file.users || []).filter(r => r && r.user_id && isState(r.data));
+    const ok = list.filter(r => userById(r.user_id)), gone = list.length - ok.length;
+    pendingAll = ok;
+    box.innerHTML = '<div class="msg"><b>Sauvegarde complète du ' + esc(dt(file.exported_at)) + '</b><p style="margin-top:6px">' + pl(list.length, 'compte') + ' dans le fichier, ' + ok.length + ' existe' + (ok.length > 1 ? 'nt' : '') + ' encore' + (gone ? ' (' + gone + ' supprimé' + (gone > 1 ? 's' : '') + ' depuis, ignoré' + (gone > 1 ? 's' : '') + ')' : '') + '. Chaque sauvegarde actuelle sera remplacée ; l’ancienne reste dans son historique.</p>' +
+      '<div class="acts" style="margin-top:10px"><button class="btn primary" data-x="restoreAllGo"' + (ok.length ? '' : ' disabled') + '>Restaurer ' + pl(ok.length, 'compte') + '</button><button class="btn outline" data-x="restoreAllCancel">Annuler</button></div></div>';
+  }
+  async function restoreAllGo(btn) {
+    if (!pendingAll || !pendingAll.length) return;
+    if (!arm(btn, 'Appuie encore pour confirmer')) return;
+    let n = 0;
+    for (const r of pendingAll) { try { await saveBackup(userById(r.user_id), r.data, '', true); n++; } catch (e) { toast(e.message); } }
+    pendingAll = null; toast(pl(n, 'compte') + ' restauré' + (n > 1 ? 's' : '')); await loadAll();
   }
 
   /* ---------- Erreurs ---------- */
@@ -372,10 +583,22 @@
   /* ---------- Événements ---------- */
   $('#nav').addEventListener('click', ev => { const b = ev.target.closest('[data-v]'); if (!b) return; view = b.dataset.v; render(); });
   $('#view').addEventListener('click', async ev => {
-    const uB = ev.target.closest('[data-u]'); if (uB) { openUser(uB.dataset.u); return; }
+    const uB = ev.target.closest('[data-u]'); if (uB) { current = null; openUser(uB.dataset.u); window.scrollTo(0, 0); return; }
     const fB = ev.target.closest('[data-f]'); if (fB) { ufilter = fB.dataset.f; $$('[data-f]').forEach(x => x.classList.toggle('on', x === fB)); renderList(); return; }
     const aF = ev.target.closest('[data-af]'); if (aF) { afilter = aF.dataset.af; render(); return; }
-    if (ev.target.closest('#detail')) { onDetail(ev); return; }
+    const x = ev.target.closest('[data-x]');
+    if (x) {
+      const k = x.dataset.x;
+      if (k === 'back') { current = null; ucache = null; render(); window.scrollTo(0, 0); }
+      else if (k === 'exportAll') exportAll().catch(e => toast(e.message));
+      else if (k === 'restoreAll') { $('#fileIn').dataset.mode = 'all'; $('#fileIn').click(); }
+      else if (k === 'restoreAllCancel') { pendingAll = null; $('#restoreAllBox').innerHTML = ''; }
+      else if (k === 'restoreAllGo') restoreAllGo(x);
+      return;
+    }
+    const ut = ev.target.closest('[data-ut]'); if (ut && ucache) { utab = ut.dataset.ut; renderUser(); return; }
+    const jd = ev.target.closest('[data-jd]'); if (jd && ucache) { jday = jd.dataset.jd; utab = 'journal'; renderUser(); return; }
+    if (ev.target.closest('#upage')) { onDetail(ev); return; }
     const eg = ev.target.closest('[data-eg]');
     if (eg) {
       const g = errGroups()[+eg.dataset.eg]; if (!g) return;
@@ -404,18 +627,40 @@
     }
   });
   $('#view').addEventListener('input', ev => { if (ev.target.id === 'q') renderList(); });
+  $('#view').addEventListener('change', ev => { if (ev.target.id === 'jdIn' && ev.target.value && ucache) { jday = ev.target.value; renderUser(); } });
+  // Infobulle des graphiques (survol à la souris, toucher sur téléphone)
+  const tip = document.createElement('div'); tip.id = 'tip'; tip.hidden = true; document.body.appendChild(tip);
+  function showTip(ev) {
+    const t = ev.target.closest && ev.target.closest('[data-tip]');
+    if (!t) { tip.hidden = true; return; }
+    tip.textContent = t.getAttribute('data-tip'); tip.hidden = false;
+    const x = Math.min(window.innerWidth - tip.offsetWidth - 8, Math.max(8, ev.clientX - tip.offsetWidth / 2));
+    tip.style.left = x + 'px'; tip.style.top = Math.max(8, ev.clientY - tip.offsetHeight - 14) + 'px';
+  }
+  $('#view').addEventListener('pointermove', showTip);
+  $('#view').addEventListener('pointerdown', showTip);
+  $('#view').addEventListener('pointerleave', () => { tip.hidden = true; });
+  window.addEventListener('scroll', () => { tip.hidden = true; }, { passive: true });
   $('#fileIn').addEventListener('change', ev => {
-    const f = ev.target.files && ev.target.files[0], id = ev.target.dataset.uid; ev.target.value = '';
-    if (!f || !id) return;
+    const f = ev.target.files && ev.target.files[0], mode = ev.target.dataset.mode; ev.target.value = '';
+    if (!f) return;
     const r = new FileReader();
     r.onload = async () => {
-      try { const data = JSON.parse(r.result); if (!data || !Array.isArray(data.entries)) throw new Error('format'); await patchBackup(id, data, 'Fichier restauré'); }
-      catch (e) { toast(e.message === 'format' ? 'Ce fichier n’est pas une sauvegarde NutriScan' : e.message); }
+      try {
+        const file = JSON.parse(r.result);
+        if (mode === 'all') { if (!file || !Array.isArray(file.users)) throw new Error('format'); showRestoreAll(file); return; }
+        if (!ucache) return;
+        // Fichier d'un seul compte, ou sauvegarde complète : on prend la partie de ce compte
+        let data = isState(file) ? file : null;
+        if (!data && file && Array.isArray(file.users)) { const row = file.users.find(x => x && x.user_id === ucache.id); if (!row) throw new Error('Ce compte n’est pas dans ce fichier'); data = row.data; }
+        if (!isState(data)) throw new Error('format');
+        await saveBackup(ucache.u, data, 'Sauvegarde restaurée : ' + pl(data.entries.length, 'aliment'));
+      } catch (e) { toast(e.message === 'format' ? 'Ce fichier n’est pas une sauvegarde NutriScan' : e.message); }
     };
     r.readAsText(f);
   });
   $('#reload').addEventListener('click', () => loadAll().then(() => toast('Données à jour')).catch(e => toast(e.message)));
-  $('#logout').addEventListener('click', async () => { await C.signOut(); users = []; events = []; current = null; $('#who').textContent = 'Console d’administration'; show('login'); });
+  $('#logout').addEventListener('click', async () => { await C.signOut(); users = []; events = []; current = null; ucache = null; $('#who').textContent = 'Console d’administration'; show('login'); });
   $('#lGoogle').addEventListener('click', () => C.oauth('google', location.origin + location.pathname));
   $('#login').addEventListener('submit', async ev => {
     ev.preventDefault();
