@@ -1,5 +1,5 @@
 /* NutriScan v2 — compteur de calories et de macros.
-   Tout est stocké sur le téléphone (localStorage). Produits : Open Food Facts. */
+   Tout est stocké sur le téléphone (localStorage), et en ligne pour les comptes. */
 (function () {
   'use strict';
 
@@ -190,6 +190,7 @@
         return true;
       } catch (e) {
         syncState = e.offline ? 'offline' : 'error'; syncError = e.message || '';
+        if (!e.offline) track('sync_error', { msg: String(e.message || '').slice(0, 200), status: e.status || 0 });
         if (e.status === 401) syncError = 'Session expirée : reconnecte-toi.';
         refreshAccountStatus(); return false;
       } finally {
@@ -200,6 +201,48 @@
     return syncing;
   }
   const doPush = () => sync({ push: true });
+
+  /* ---------- Statistiques et rapports d'erreurs (seulement avec l'accord de l'utilisateur) ---------- */
+  const VERSION = '2.5';
+  const TQ_KEY = 'nutriscan.tq';
+  let TQ = store.get(TQ_KEY, []);
+  let consent = store.get('nutriscan.consent', null); // true, false, ou null = pas encore demandé
+  let flushT = null, flushing = false;
+  function track(type, data) {
+    if (consent !== true) return;
+    TQ.push({ t: type, d: data || null, at: new Date().toISOString() });
+    if (TQ.length > 300) TQ.splice(0, TQ.length - 300);
+    store.set(TQ_KEY, TQ);
+    clearTimeout(flushT); flushT = setTimeout(flushTrack, /error/.test(type) ? 1500 : 8000);
+  }
+  async function flushTrack() {
+    if (flushing || !C.enabled || !navigator.onLine || !TQ.length || consent !== true) return;
+    flushing = true;
+    const batch = TQ.slice(0, 50);
+    const uidv = C.session && C.session.user ? C.session.user.id : null;
+    const rows = batch.map(e => ({ created_at: e.at, user_id: uidv, device: DEVICE, type: e.t, data: e.d, version: VERSION, ua: navigator.userAgent.slice(0, 180) }));
+    try {
+      await C.req('/rest/v1/events', { method: 'POST', auth: !!uidv, headers: { Prefer: 'return=minimal' }, body: rows });
+      TQ = TQ.slice(batch.length); store.set(TQ_KEY, TQ);
+    } catch (e) {
+      if (e.status === 400 || e.status === 403 || e.status === 404) { TQ = TQ.slice(batch.length); store.set(TQ_KEY, TQ); }
+    }
+    flushing = false;
+    if (TQ.length && navigator.onLine) flushT = setTimeout(flushTrack, 4000);
+  }
+  function setConsent(v) {
+    consent = !!v; store.set('nutriscan.consent', consent);
+    if (!consent) { TQ = []; store.set(TQ_KEY, TQ); }
+    else track('consent', { v: VERSION });
+  }
+  window.addEventListener('error', ev => {
+    if (!ev || !ev.message || ev.message === 'Script error.') return;
+    track('error', { msg: String(ev.message).slice(0, 300), src: String(ev.filename || '').split('/').pop(), line: ev.lineno, col: ev.colno, stack: ev.error && ev.error.stack ? String(ev.error.stack).slice(0, 800) : '' });
+  });
+  window.addEventListener('unhandledrejection', ev => {
+    const r = ev && ev.reason;
+    track('error', { msg: String((r && r.message) || r).slice(0, 300), stack: r && r.stack ? String(r.stack).slice(0, 800) : '', kind: 'promise' });
+  });
 
   /* ---------- Produits ---------- */
   const TMP = new Map();          // produits vus pendant la session (recherche, scan)
@@ -253,13 +296,13 @@
       title = 'Aucun avertissement'; sub = 'Rien de sensible détecté dans les ingrédients.';
     } else {
       icon = 'i-help'; title = 'Ingrédients inconnus';
-      sub = p.source === 'custom' ? 'Aliment créé par toi : pas de liste d’ingrédients.' : 'Open Food Facts n’a pas encore la liste d’ingrédients : regarde le paquet.';
+      sub = p.source === 'custom' ? 'Aliment créé par toi : pas de liste d’ingrédients.' : 'La liste d’ingrédients de ce produit n’est pas encore disponible : regarde le paquet.';
     }
     return '<section class="halal h-' + h.status + '" aria-label="Avertissements">' +
       '<div class="h-top"><span class="h-ic">' + ic(icon) + '</span><div class="min0"><b>' + esc(title) + '</b><small>' + esc(sub) + '</small></div></div>' +
       (h.reasons.length ? '<ul class="h-list">' + h.reasons.map(r => '<li class="h-' + r.level + '"><i></i><b>' + esc(r.title) + '</b><span>' + esc(r.why) + '</span></li>').join('') + '</ul>' : '') +
       (vegChip ? '<div class="h-chips">' + vegChip + '</div>' : '') +
-      (h.status === 'unknown' ? '' : '<p class="h-note">Analyse automatique de la liste d’ingrédients (Open Food Facts). Elle peut être incomplète : vérifie toujours l’emballage.</p>') +
+      (h.status === 'unknown' ? '' : '<p class="h-note">Analyse automatique de la liste d’ingrédients. Elle peut être incomplète : vérifie toujours l’emballage.</p>') +
       '</section>';
   }
   const HAL_TAG = { u: ['orange', 'Origine animale possible'], i: ['orange', 'Insectes'], b: ['orange', 'Os d’animaux'], g: ['red', 'Souvent du porc'], a: ['red', 'Alcool'] };
@@ -665,7 +708,7 @@
     html += '<p class="sect">Produits du commerce</p>';
     if (!navigator.onLine) html += '<p class="hint">Hors ligne : seuls tes aliments et les aliments courants sont disponibles. La recherche dans les produits du commerce reviendra avec Internet.</p>';
     else if (q.length < 3) html += '<p class="hint">Tape au moins 3 lettres pour chercher dans 3 millions de produits.</p>';
-    else if (AF.offState === 'loading' || AF.offState === 'idle') html += '<div class="loading"><div class="spin"></div>Recherche dans Open Food Facts…</div>';
+    else if (AF.offState === 'loading' || AF.offState === 'idle') html += '<div class="loading"><div class="spin"></div>Recherche des produits…</div>';
     else if (AF.offState === 'error') html += '<div class="msg err">La recherche ne répond pas (connexion, ou trop de recherches d’affilée). <button class="linkbtn" data-act="afRetry">Réessayer</button></div>';
     else {
       const off = AF.off.filter(p => !shown.has(p.key));
@@ -675,6 +718,7 @@
   }
   async function offSearch(q) {
     if (!AF) return;
+    track('search', { q: q.slice(0, 60) });
     const id = ++AF.req;
     if (SEARCH_CACHE.has(q)) { AF.off = SEARCH_CACHE.get(q); AF.offState = 'done'; renderAF(); return; }
     AF.offState = 'loading'; renderAF();
@@ -707,6 +751,7 @@
 
   /* ================= Entrées ================= */
   function addEntry(p, o) {
+    track('product_add', { source: p.source || 'off' });
     const t = calc(p, o.grams);
     S.entries.push({ id: uid(), date: day, ts: Date.now(), mt: now(), meal: o.meal, key: p.key, name: p.name, brand: p.brand || '', amount: o.amount, unitIdx: o.unitIdx, unit: p.unit || 'g', grams: o.grams, kcal: t.kcal, p: t.p, c: t.c, f: t.f });
     remember(p); save(); renderAll();
@@ -785,7 +830,7 @@
   function productHTML(ps) {
     const p = ps.p, n = p.per100, u = p.unit || 'g', portions = portionsOf(p);
     const isFav = S.favorites.includes(p.key);
-    const src = p.source === 'gen' ? 'Aliment courant' : p.source === 'custom' ? 'Mon aliment' : 'Open Food Facts';
+    const src = p.source === 'gen' ? 'Aliment courant' : p.source === 'custom' ? 'Mon aliment' : 'Produit';
     const img = '<div class="ps-img">' + esc(p.name.charAt(0).toUpperCase()) + imgTag(p) + '</div>';
     const units = '<button class="chip" data-u="0">' + u + '</button>' + portions.map((x, i) => '<button class="chip" data-u="' + (i + 1) + '">' + esc(x.label) + ' · ' + f1(x.g) + ' ' + u + '</button>').join('');
     const row = (label, key, sub) => n[key] == null ? '' : '<div class="tr' + (sub ? ' sub' : '') + '"><span>' + label + '</span><span class="num">' + f1(n[key]) + (key === 'kcal' ? '' : ' g') + '</span><span class="num" data-q="' + key + '"></span></div>';
@@ -795,7 +840,7 @@
       '<div class="ps-head">' + img + '<div class="min0"><h3 class="ps-name">' + esc(p.name) + '</h3><p class="ps-brand">' + esc([p.brand, p.qty].filter(Boolean).join(' · ') || (p.source === 'gen' ? 'Valeurs moyennes' : '')) + '</p>' +
       (p.nutri ? '<span class="ns">Nutri-Score <b style="background:' + NUTRI_COLORS[p.nutri] + '">' + p.nutri + '</b></span>' : '') + '</div></div>' +
       '<div id="psHalal">' + halalCardHTML(p) + '</div>' +
-      (p.hasNutri === false ? '<div class="msg err">Ce produit n’a pas encore ses valeurs nutritionnelles dans Open Food Facts. Tu peux le recréer avec « Créer un aliment ».</div>' : '') +
+      (p.hasNutri === false ? '<div class="msg err">Les valeurs nutritionnelles de ce produit ne sont pas encore disponibles. Tu peux le recréer avec « Créer un aliment ».</div>' : '') +
       '<div class="amt-row"><span class="flabel">Quantité</span><div class="amt"><button data-pa="minus" aria-label="Moins">' + ic('i-minus') + '</button>' +
       '<input id="psAmt" inputmode="decimal" aria-label="Quantité" autocomplete="off"><button data-pa="plus" aria-label="Plus">' + ic('i-plus') + '</button></div>' +
       '<div class="chips" id="psUnits">' + units + '</div></div>' +
@@ -900,7 +945,7 @@
     const local = S.products[code] || Object.values(S.products).find(p => p.code === code) || TMP.get(code);
     if (local) { openProduct(local, { swap: opts.swap, fromScan: opts.fromScan }); return; }
     const el = mountSheet('<div class="grab"></div><div class="sheet-head"><h3>Recherche du produit</h3><button class="iconbtn" data-act="close" aria-label="Fermer">' + ic('i-x') + '</button></div>' +
-      '<div class="loading"><div class="spin"></div>Code <b class="num">' + esc(code) + '</b> : je cherche dans Open Food Facts…</div>');
+      '<div class="loading"><div class="spin"></div>Code <b class="num">' + esc(code) + '</b> : recherche du produit…</div>');
     const layer = openLayer({ el, kind: 'product' }, opts.swap);
     let data = null, failed = false;
     try {
@@ -920,13 +965,15 @@
       return;
     }
     if (failed) { offlineScan(layer, code, opts); return; }
+    track('scan_unknown', { code, scan: !!opts.fromScan });
     box.innerHTML = head('Produit inconnu') +
-      '<div class="msg">Le code <b class="num">' + esc(code) + '</b> n’est pas encore dans Open Food Facts. Crée-le en 30 secondes avec l’étiquette du paquet : il sera reconnu à chaque prochain scan.</div>' +
+      '<div class="msg">Le code <b class="num">' + esc(code) + '</b> n’est pas encore dans la base. Crée-le en 30 secondes avec l’étiquette du paquet : il sera reconnu à chaque prochain scan.</div>' +
       '<div class="row-btns"><button class="btn primary" data-act="createCode" data-code="' + esc(code) + '">Créer ce produit</button><button class="btn outline" data-act="rescan">Scanner un autre</button></div>';
   }
 
   /* Hors ligne : on garde le produit scanné et on le complète au retour d'Internet */
   function offlineScan(layer, code, opts) {
+    track('scan_offline', { code, online: navigator.onLine });
     let meal = (opts && opts.meal) || (AF && AF.meal) || defaultMeal();
     const box = $('.sheet-in', layer.el);
     box.innerHTML = head(navigator.onLine ? 'Connexion trop lente' : 'Tu es hors ligne') +
@@ -981,21 +1028,53 @@
   }
 
   /* ================= Scanner ================= */
-  const SC = { inst: null, running: false, handled: false, torch: false, zoom: false, torchF: null, zoomF: null, starting: false };
-  let libPromise = null;
-  function loadScanLib() {
-    if (window.Html5Qrcode) return Promise.resolve();
-    if (libPromise) return libPromise;
-    const urls = ['https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js', 'https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js'];
-    libPromise = urls.reduce((p, url) => p.catch(() => new Promise((res, rej) => {
-      const s = document.createElement('script'); s.src = url; s.async = true;
-      s.onload = () => (window.Html5Qrcode ? res() : rej(new Error('lib'))); s.onerror = () => { s.remove(); rej(new Error('net')); };
+  /* Lecteur principal : API BarcodeDetector (native sur Android, moteur ZXing en WebAssembly sur iPhone).
+     On lit la zone du cadre en haute définition, on vérifie la clé de contrôle du code-barres,
+     et on garde l'ancien lecteur (html5-qrcode) en secours. */
+  const SC = { stream: null, track: null, running: false, handled: false, torch: false, zoom: false, caps: null, starting: false,
+    det: null, engine: '', timer: 0, busy: false, n: 0, t0: 0, inst: null, legacy: false, last: '', lastN: 0 };
+  const FORMATS = ['ean_13', 'ean_8', 'upc_a', 'upc_e'];
+  const DET_URLS = ['https://cdn.jsdelivr.net/npm/barcode-detector@3.0.7/dist/iife/ponyfill.min.js', 'https://fastly.jsdelivr.net/npm/barcode-detector@3.0.7/dist/iife/ponyfill.min.js', 'https://unpkg.com/barcode-detector@3.0.7/dist/iife/ponyfill.min.js'];
+  const LEGACY_URLS = ['https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js', 'https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js'];
+  const loaded = {};
+  function loadScript(urls, ready) {
+    const key = urls[0];
+    if (ready()) return Promise.resolve();
+    if (loaded[key]) return loaded[key];
+    loaded[key] = urls.reduce((p, url) => p.catch(() => new Promise((res, rej) => {
+      const s = document.createElement('script'); s.src = url; s.async = true; s.crossOrigin = 'anonymous';
+      s.onload = () => (ready() ? res() : rej(new Error('lib'))); s.onerror = () => { s.remove(); rej(new Error('net')); };
       document.head.appendChild(s);
-    })), Promise.reject(new Error('start'))).catch(e => { libPromise = null; throw e; });
-    return libPromise;
+    })), Promise.reject(new Error('start'))).catch(e => { loaded[key] = null; throw e; });
+    return loaded[key];
+  }
+  async function getDetector() {
+    if (SC.det) return SC.det;
+    if ('BarcodeDetector' in window) {
+      try {
+        const sup = await window.BarcodeDetector.getSupportedFormats();
+        if (sup.includes('ean_13')) { SC.det = new window.BarcodeDetector({ formats: FORMATS.filter(f => sup.includes(f)) }); SC.engine = 'natif'; return SC.det; }
+      } catch (e) { /* on passe au moteur WebAssembly */ }
+    }
+    await loadScript(DET_URLS, () => !!(window.BarcodeDetectionAPI && window.BarcodeDetectionAPI.BarcodeDetector));
+    SC.det = new window.BarcodeDetectionAPI.BarcodeDetector({ formats: FORMATS });
+    SC.engine = 'zxing';
+    return SC.det;
+  }
+  // Prépare le lecteur en avance (et le met en cache pour le mode hors ligne)
+  function warmScanner() { getDetector().then(d => { const c = document.createElement('canvas'); c.width = c.height = 8; return d.detect(c).catch(() => {}); }).catch(() => {}); }
+  // Clé de contrôle GTIN (EAN-8, EAN-13, UPC-A)
+  function validGTIN(code) {
+    if (!/^\d+$/.test(code)) return false;
+    if (code.length === 12) code = '0' + code;
+    if (code.length !== 8 && code.length !== 13) return false;
+    const d = code.split('').map(Number), check = d.pop();
+    let sum = 0; d.reverse().forEach((x, i) => { sum += x * (i % 2 === 0 ? 3 : 1); });
+    return (10 - sum % 10) % 10 === check;
   }
   const scannerOpen = () => layers.some(l => l.kind === 'scanner');
   function scanMsg(t, err) { const m = $('#scMsg'); m.textContent = t; m.classList.toggle('err', !!err); }
+  function showManual() { $('#scManualForm').hidden = false; }
   function openScanner(swap) {
     const el = $('#scanner');
     el.hidden = false; requestAnimationFrame(() => el.classList.add('show'));
@@ -1005,73 +1084,116 @@
     $('#scTorch').classList.remove('on'); $('#scZoom').classList.remove('on');
     SC.torch = false; SC.zoom = false;
     openLayer({ el, kind: 'scanner', persistent: true, onClose: () => {
+      if ((SC.running || SC.starting) && !SC.handled) track('scan_cancel', { ms: Date.now() - (SC.t0 || Date.now()), engine: SC.engine, reads: SC.n });
       stopScan(); el.classList.remove('show');
       setTimeout(() => { if (!scannerOpen()) el.hidden = true; }, 220);
     } }, swap);
     startScan();
+  }
+  function cameraError(e) {
+    const m = String((e && (e.name || e.message)) || e);
+    track('camera_error', { name: e && e.name, message: String(e && e.message || m).slice(0, 200) });
+    if (/NotAllowed|Permission|denied/i.test(m)) scanMsg('Accès à la caméra refusé. Autorise-le dans les réglages du navigateur pour ce site, ou tape le code.', true);
+    else if (/NotFound|Overconstrained|no camera/i.test(m)) scanMsg('Aucune caméra trouvée. Tape le code-barres.', true);
+    else if (/NotReadable|in use/i.test(m)) scanMsg('La caméra est utilisée par une autre appli. Ferme-la puis réessaie.', true);
+    else scanMsg('Impossible d’ouvrir la caméra. Tape le code-barres.', true);
+    showManual();
   }
   async function startScan() {
     scanMsg('Place le code-barres dans le cadre');
     if (!window.isSecureContext || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
       scanMsg('La caméra n’est pas disponible ici (il faut ouvrir l’appli depuis son lien https). Tape le code-barres.', true); showManual(); return;
     }
-    if (SC.starting) return;
-    SC.starting = true;
-    try { await loadScanLib(); } catch (e) { SC.starting = false; scanMsg('Le module de scan n’a pas pu se charger (connexion ?). Tape le code-barres.', true); showManual(); return; }
+    if (SC.starting || SC.running) return;
+    SC.starting = true; SC.handled = false; SC.legacy = false; SC.hinted = false; SC.n = 0; SC.last = ''; SC.lastN = 0;
+    let det = null;
+    try { det = await getDetector(); } catch (e) { det = null; }
     if (!scannerOpen()) { SC.starting = false; return; }
+    if (!det) { SC.starting = false; startLegacy(); return; }
     try {
-      if (!SC.inst) {
-        const F = window.Html5QrcodeSupportedFormats;
-        SC.inst = new window.Html5Qrcode('reader', { formatsToSupport: [F.EAN_13, F.EAN_8, F.UPC_A, F.UPC_E], experimentalFeatures: { useBarCodeDetectorIfSupported: true }, verbose: false });
-      }
-      SC.handled = false;
-      await SC.inst.start({ facingMode: 'environment' }, {
-        fps: 12, disableFlip: true,
-        videoConstraints: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }
-      }, onDecode, () => {});
-      SC.running = true;
-      SC.starting = false;
-      if (!scannerOpen()) { stopScan(); return; }
-      setupCamFeatures();
-      fixVideo();
-      setTimeout(checkVideo, 1600);
+      SC.stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } } });
     } catch (e) {
-      SC.starting = false; SC.running = false;
-      const m = String((e && (e.name || e.message)) || e);
-      if (/NotAllowed|Permission|denied/i.test(m)) scanMsg('Accès à la caméra refusé. Autorise-le dans les réglages du navigateur pour ce site, ou tape le code.', true);
-      else if (/NotFound|Overconstrained|no camera/i.test(m)) scanMsg('Aucune caméra trouvée. Tape le code-barres.', true);
-      else if (/NotReadable|in use/i.test(m)) scanMsg('La caméra est utilisée par une autre appli. Ferme-la puis réessaie.', true);
-      else scanMsg('Impossible d’ouvrir la caméra. Tape le code-barres.', true);
-      showManual();
+      try { SC.stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: 'environment' } }); }
+      catch (e2) { SC.starting = false; cameraError(e2); return; }
     }
-  }
-  function setupCamFeatures() {
-    let caps = null;
-    try { caps = SC.inst.getRunningTrackCameraCapabilities(); } catch (e) { caps = null; }
-    try { SC.torchF = caps && caps.torchFeature && caps.torchFeature().isSupported() ? caps.torchFeature() : null; } catch (e) { SC.torchF = null; }
-    try { SC.zoomF = caps && caps.zoomFeature && caps.zoomFeature().isSupported() ? caps.zoomFeature() : null; } catch (e) { SC.zoomF = null; }
-    $('#scTorch').hidden = !SC.torchF; $('#scTorchSpacer').hidden = !!SC.torchF;
-    $('#scZoom').hidden = !(SC.zoomF && SC.zoomF.max() >= 1.8);
-    try { const r = SC.inst.applyVideoConstraints({ advanced: [{ focusMode: 'continuous' }] }); if (r && r.catch) r.catch(() => {}); } catch (e) { /* pas d'autofocus réglable */ }
-  }
-  // iPhone : la vidéo doit être « inline », muette, et parfois relancée par un toucher
-  function fixVideo() {
-    const v = $('#reader video'); if (!v) return null;
+    if (!scannerOpen()) { SC.starting = false; stopScan(); return; }
+    const v = $('#camVideo');
+    v.hidden = false; $('#reader').hidden = true;
     v.setAttribute('playsinline', ''); v.setAttribute('webkit-playsinline', ''); v.setAttribute('muted', ''); v.setAttribute('autoplay', '');
     v.muted = true; v.playsInline = true;
-    try { const pr = v.play(); if (pr && pr.catch) pr.catch(() => {}); } catch (e) { /* rien */ }
-    return v;
+    v.srcObject = SC.stream;
+    try { await v.play(); } catch (e) { /* relancé par le bouton si besoin */ }
+    SC.track = SC.stream.getVideoTracks()[0];
+    SC.running = true; SC.starting = false; SC.t0 = Date.now();
+    setupCamFeatures();
+    track('scan_start', { engine: SC.engine });
+    setTimeout(checkVideo, 1600);
+    loop();
+  }
+  function setupCamFeatures() {
+    let caps = {};
+    try { caps = SC.track && SC.track.getCapabilities ? SC.track.getCapabilities() : {}; } catch (e) { caps = {}; }
+    SC.caps = caps;
+    const adv = [];
+    if (Array.isArray(caps.focusMode) && caps.focusMode.includes('continuous')) adv.push({ focusMode: 'continuous' });
+    if (adv.length) SC.track.applyConstraints({ advanced: adv }).catch(() => {});
+    $('#scTorch').hidden = !caps.torch; $('#scTorchSpacer').hidden = !!caps.torch;
+    $('#scZoom').hidden = !(caps.zoom && caps.zoom.max >= 1.8);
+  }
+  // Zone du cadre, convertie en pixels de la vidéo (la vidéo est affichée en « cover »)
+  function frameRegion(v) {
+    const vw = v.videoWidth, vh = v.videoHeight, sw = window.innerWidth, sh = window.innerHeight;
+    const scale = Math.max(sw / vw, sh / vh);
+    const ox = (vw * scale - sw) / 2, oy = (vh * scale - sh) / 2;
+    const r = $('#scFrame').getBoundingClientRect();
+    const padX = r.width * 0.12, padY = r.height * 0.35;
+    let x = (r.left - padX + ox) / scale, y = (r.top - padY + oy) / scale, w = (r.width + 2 * padX) / scale, h = (r.height + 2 * padY) / scale;
+    x = clamp(x, 0, vw); y = clamp(y, 0, vh); w = clamp(w, 1, vw - x); h = clamp(h, 1, vh - y);
+    return { x, y, w, h };
+  }
+  const scanCanvas = document.createElement('canvas');
+  const scanCtx = scanCanvas.getContext('2d', { willReadFrequently: true });
+  function loop() {
+    if (!SC.running) return;
+    SC.timer = setTimeout(async () => {
+      if (!SC.running) return;
+      const v = $('#camVideo');
+      if (!SC.busy && v.readyState >= 2 && v.videoWidth) {
+        SC.busy = true;
+        try {
+          // 3 lectures sur 4 dans la zone du cadre en pleine définition, 1 sur 4 sur toute l'image
+          let reg = (SC.n++ % 4 === 3) ? { x: 0, y: 0, w: v.videoWidth, h: v.videoHeight } : frameRegion(v);
+          const maxW = 1600, k = Math.min(1, maxW / reg.w);
+          scanCanvas.width = Math.round(reg.w * k); scanCanvas.height = Math.round(reg.h * k);
+          scanCtx.drawImage(v, reg.x, reg.y, reg.w, reg.h, 0, 0, scanCanvas.width, scanCanvas.height);
+          if (!SC.hinted && Date.now() - SC.t0 > 7000) { SC.hinted = true; scanMsg('Pas encore lu ? Recule le téléphone (15 à 20 cm), le code bien à plat' + (SC.caps && (SC.caps.torch || SC.caps.zoom) ? ', ou essaie la lampe / le zoom.' : '.')); }
+          const found = await SC.det.detect(scanCanvas);
+          for (const b of found || []) {
+            const code = String(b.rawValue || '').replace(/\D/g, '');
+            if (b.format === 'upc_e' || code.length < 8) {
+              // UPC-E : pas de clé de contrôle simple, on demande deux lectures identiques
+              if (code.length >= 6) { if (SC.last === code) SC.lastN++; else { SC.last = code; SC.lastN = 1; } if (SC.lastN >= 2) { onDecode(code); break; } }
+            } else if (validGTIN(code)) { onDecode(code); break; }
+          }
+        } catch (e) { /* image suivante */ }
+        SC.busy = false;
+      }
+      loop();
+    }, 80);
   }
   function checkVideo() {
     if (!scannerOpen() || !SC.running) return;
-    const v = $('#reader video');
+    const v = SC.legacy ? $('#reader video') : $('#camVideo');
     const box = v && v.getBoundingClientRect();
     const black = !v || v.paused || !v.videoWidth || !box || box.height < 50;
     $('#scTap').hidden = !black;
-    if (black) scanMsg('La caméra ne s’affiche pas ? Touche le bouton ci-dessous.', false);
+    if (black) { scanMsg('La caméra ne s’affiche pas ? Touche le bouton ci-dessous.', false); track('camera_black', { engine: SC.engine }); }
   }
   async function stopScan() {
-    SC.running = false;
+    SC.running = false; SC.starting = false;
+    clearTimeout(SC.timer);
+    if (SC.stream) { SC.stream.getTracks().forEach(t => { try { t.stop(); } catch (e) { /* rien */ } }); SC.stream = null; SC.track = null; }
+    const v = $('#camVideo'); if (v) { try { v.pause(); } catch (e) { /* rien */ } v.srcObject = null; }
     if (SC.inst) { try { if (SC.inst.isScanning) await SC.inst.stop(); } catch (e) { /* déjà arrêté */ } }
   }
   function onDecode(text) {
@@ -1079,11 +1201,29 @@
     const code = String(text).replace(/\D/g, '');
     if (code.length < 6) return;
     SC.handled = true;
+    track('scan_ok', { code, ms: Date.now() - SC.t0, engine: SC.legacy ? 'html5-qrcode' : SC.engine });
     $('#scFrame').classList.add('ok');
     if (navigator.vibrate) { try { navigator.vibrate(70); } catch (e) { /* rien */ } }
     stopScan().then(() => { if (scannerOpen()) lookupCode(code, { swap: true, fromScan: true }); });
   }
-  function showManual() { $('#scManualForm').hidden = false; }
+  // Lecteur de secours (si le lecteur principal ne se charge pas)
+  async function startLegacy() {
+    try { await loadScript(LEGACY_URLS, () => !!window.Html5Qrcode); } catch (e) { scanMsg('Le module de scan n’a pas pu se charger (connexion ?). Tape le code-barres.', true); showManual(); return; }
+    if (!scannerOpen()) return;
+    $('#camVideo').hidden = true; $('#reader').hidden = false;
+    try {
+      if (!SC.inst) {
+        const F = window.Html5QrcodeSupportedFormats;
+        SC.inst = new window.Html5Qrcode('reader', { formatsToSupport: [F.EAN_13, F.EAN_8, F.UPC_A, F.UPC_E], experimentalFeatures: { useBarCodeDetectorIfSupported: true }, verbose: false });
+      }
+      SC.legacy = true; SC.engine = 'html5-qrcode';
+      await SC.inst.start({ facingMode: 'environment' }, { fps: 12, disableFlip: true, qrbox: (w, h) => ({ width: Math.floor(w * 0.9), height: Math.floor(Math.min(h * 0.5, w * 0.6)) }) }, onDecode, () => {});
+      SC.running = true; SC.t0 = Date.now();
+      track('scan_start', { engine: SC.engine });
+      const v = $('#reader video'); if (v) { v.setAttribute('playsinline', ''); v.muted = true; try { await v.play(); } catch (e) { /* rien */ } }
+      setTimeout(checkVideo, 1600);
+    } catch (e) { cameraError(e); }
+  }
 
   /* ================= Ajout rapide ================= */
   function openQuick(opts) {
@@ -1405,10 +1545,11 @@
       '<section class="card"><div class="menu">' +
       '<button data-act="myFoods">' + ic('i-edit') + '<span class="grow">Mes aliments</span><small>' + nCustom + '</small>' + ic('i-right', 'sm') + '</button>' +
       '<button data-act="favList">' + ic('i-star') + '<span class="grow">Mes favoris</span><small>' + S.favorites.length + '</small>' + ic('i-right', 'sm') + '</button>' +
+      '<button data-act="about">' + ic('i-help') + '<span class="grow">À propos et confidentialité</span>' + ic('i-right', 'sm') + '</button>' +
       '<button data-act="exportData">' + ic('i-download') + '<span class="grow">Sauvegarder mes données</span></button>' +
       '<button data-act="importData">' + ic('i-upload') + '<span class="grow">Restaurer une sauvegarde</span></button>' +
       '<button class="danger" data-act="wipe" data-confirm="Appuie encore : tout sera effacé">' + ic('i-trash') + '<span class="grow">Effacer toutes mes données</span></button></div></section>' +
-      '<p class="credit">NutriScan 2.0 · Tes données restent sur ce téléphone.<br>Produits : <a href="https://world.openfoodfacts.org" target="_blank" rel="noopener">Open Food Facts</a> (licence ODbL)</p>';
+      '<p class="credit">NutriScan ' + VERSION + '</p>';
   }
   /* ================= Compte ================= */
   function syncText() {
@@ -1442,11 +1583,65 @@
       '<button class="danger" data-act="deleteAccount" data-confirm="Appuie encore : compte et sauvegarde supprimés">' + ic('i-trash') + '<span class="grow">Supprimer mon compte</span></button>' +
       '</div></section>';
   }
-  const PRIVACY = '<p>Quand tu crées un compte, NutriScan enregistre en ligne (base Supabase, hébergée en Europe) : ton e-mail et toutes les données de l’appli (repas, aliments, poids, eau, activités, objectifs, réglages, y compris tes réglages d’avertissements).</p>' +
+  const PRIVACY = '<p>Quand tu crées un compte, NutriScan enregistre en ligne (base hébergée en Europe) : ton e-mail et toutes les données de l’appli (repas, aliments, poids, eau, activités, objectifs, réglages, y compris tes réglages d’avertissements).</p>' +
     '<p>But : sauvegarder ton compte et le restaurer si tu perds ton téléphone ou tes données.</p>' +
     '<p>Qui peut les voir : toi, et l’administrateur de l’appli, uniquement pour gérer les sauvegardes et restaurer un compte. Elles ne sont ni vendues ni partagées.</p>' +
     '<p>Tes droits : tu peux télécharger tes données (Profil → Sauvegarder mes données) et supprimer ton compte à tout moment (Profil → Supprimer mon compte). La suppression efface aussi toutes les versions sauvegardées.</p>' +
     '<p>Sans compte, tout reste uniquement sur ton téléphone.</p>';
+  function openAbout() {
+    const seg = '<div class="seg">' + [['true', 'Activés'], ['false', 'Désactivés']].map(o => '<button data-ab="' + o[0] + '"' + (String(consent === true) === o[0] ? ' class="on"' : '') + '>' + o[1] + '</button>').join('') + '</div>';
+    const el = mountSheet(head('À propos') +
+      '<div class="setrow" style="border-top:0;padding-top:0"><span>Rapports d’erreurs et statistiques d’utilisation</span>' + seg + '</div>' +
+      '<p class="hint">Ils servent à repérer et corriger les bugs (caméra, scans ratés, erreurs). Rien sur tes quantités, ton poids ou ta santé.</p>' +
+      '<div class="prose">' + PRIVACY + '</div>' +
+      '<p class="hint">NutriScan ' + VERSION + '<br>Données produits : Open Food Facts, licence ODbL.</p>');
+    openLayer({ el });
+    el.addEventListener('click', ev => {
+      const b = ev.target.closest('[data-ab]'); if (!b) return;
+      setConsent(b.dataset.ab === 'true');
+      $$('[data-ab]', el).forEach(x => x.classList.toggle('on', x === b));
+      toast(consent ? 'Merci ! Rapports activés' : 'Rapports désactivés');
+    });
+  }
+  function askConsent() {
+    if (consent !== null || !C.enabled || layers.length || OB) return;
+    const el = mountSheet('<div class="grab"></div><div class="sheet-head"><h3>Aider à améliorer NutriScan ?</h3></div>' +
+      '<p class="prose">Avec ton accord, l’appli envoie des <b>rapports d’erreurs</b> et des <b>statistiques d’utilisation</b> : ouvertures de l’appli, codes-barres scannés et produits introuvables, recherches, problèmes de caméra, modèle de ton téléphone. Si tu as un compte, ils sont liés à ton compte.</p>' +
+      '<p class="hint">Rien sur tes quantités, ton poids ou ta santé. Tu peux changer d’avis à tout moment dans Profil → À propos.</p>' +
+      '<div class="row-btns"><button class="btn outline" data-cs="0">Non merci</button><button class="btn primary" data-cs="1">J’accepte</button></div>');
+    openLayer({ el });
+    el.addEventListener('click', ev => {
+      const b = ev.target.closest('[data-cs]'); if (!b) return;
+      setConsent(b.dataset.cs === '1');
+      if (consent) track('app_open', openInfo());
+      closeTop();
+    });
+  }
+  function openInfo() {
+    return { standalone: !!((window.matchMedia && matchMedia('(display-mode: standalone)').matches) || navigator.standalone), online: navigator.onLine, lang: navigator.language, w: screen.width, h: screen.height, logged: !!(C.session) };
+  }
+  let lastMsgCheck = 0;
+  async function checkMessages() {
+    if (!C.enabled || !C.session || !navigator.onLine) return;
+    lastMsgCheck = Date.now();
+    try {
+      const me = C.session.user.id;
+      const [msgs, reads] = await Promise.all([
+        C.req('/rest/v1/messages?select=id,title,body,created_at&order=created_at.desc&limit=20', { auth: true }),
+        C.req('/rest/v1/message_reads?select=message_id&user_id=eq.' + me, { auth: true })
+      ]);
+      const seen = new Set((reads || []).map(r => r.message_id));
+      const unread = (msgs || []).filter(m => !seen.has(m.id));
+      if (!unread.length || layers.length || OB) return;
+      const el = mountSheet(head(unread.length > 1 ? unread.length + ' nouveaux messages' : 'Nouveau message') +
+        unread.map(m => '<div class="msg"><b>' + esc(m.title) + '</b><p style="margin-top:6px;white-space:pre-wrap">' + esc(m.body) + '</p><p class="hint" style="margin-top:8px">' +
+          esc(new Date(m.created_at).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' })) + '</p></div>').join('') +
+        '<button class="btn primary" data-act="close">OK</button>');
+      openLayer({ el, onClose: () => {
+        C.req('/rest/v1/message_reads', { method: 'POST', auth: true, headers: { Prefer: 'resolution=ignore-duplicates,return=minimal' }, body: unread.map(m => ({ message_id: m.id, user_id: me })) }).catch(() => {});
+      } });
+    } catch (e) { /* pas de messages */ }
+  }
   function openPrivacy(swap) {
     const el = mountSheet(head('Confidentialité') + '<div class="prose">' + PRIVACY + '</div>');
     openLayer({ el }, swap);
@@ -1454,10 +1649,11 @@
   function openAuth(mode) {
     const signup = mode === 'signup';
     const el = mountSheet(head(signup ? 'Créer un compte' : 'Se connecter') +
+      (window.NS_CLOUD && window.NS_CLOUD.google ? '<button type="button" class="btn outline" data-am="google" style="width:100%">' + ic('i-user', 'sm') + 'Continuer avec Google</button><p class="hint center">ou avec ton e-mail</p>' : '') +
       '<form id="authForm" class="stack" autocomplete="on" novalidate>' +
       '<div class="field"><label for="aEmail">E-mail</label><input id="aEmail" type="email" inputmode="email" autocomplete="email" placeholder="toi@exemple.com" required></div>' +
       '<div class="field"><label for="aPass">Mot de passe</label><input id="aPass" type="password" autocomplete="' + (signup ? 'new-password' : 'current-password') + '" placeholder="' + (signup ? '8 caractères minimum' : '') + '" required></div>' +
-      (signup ? '<label class="check"><input type="checkbox" id="aConsent"><span>J’accepte que mes données NutriScan (repas, poids, objectifs, réglages) soient sauvegardées en ligne et consultables par l’administrateur de l’appli pour pouvoir restaurer mon compte. Je peux supprimer mon compte à tout moment. <button type="button" class="linkbtn" data-act="privacyPush">En savoir plus</button></span></label>' : '') +
+      '<label class="check"><input type="checkbox" id="aConsent"><span>' + (signup ? '' : 'Première connexion ? ') + 'J’accepte que mes données NutriScan (repas, poids, objectifs, réglages) soient sauvegardées en ligne et consultables par l’administrateur de l’appli pour pouvoir restaurer mon compte. Je peux supprimer mon compte à tout moment. <button type="button" class="linkbtn" data-act="privacyPush">En savoir plus</button></span></label>' +
       '<p class="hint err" id="aErr" hidden></p>' +
       '<button class="btn primary" type="submit" id="aSubmit">' + (signup ? 'Créer mon compte' : 'Se connecter') + '</button>' +
       (signup ? '<button type="button" class="linkbtn" data-am="login">Déjà un compte ? Se connecter</button>' :
@@ -1474,6 +1670,13 @@
         C.recover(email, location.origin + location.pathname).then(() => { showErr(''); toast('E-mail envoyé : ouvre le lien pour choisir un nouveau mot de passe'); }).catch(e => showErr(e.message));
         return;
       }
+      if (b.dataset.am === 'google') {
+        if (!$('#aConsent', el).checked) { showErr('Coche la case pour accepter la sauvegarde en ligne.'); return; }
+        SYNC.consentAt = new Date().toISOString(); saveSync();
+        track('login_start', { provider: 'google' }); flushTrack();
+        C.oauth('google', location.origin + location.pathname);
+        return;
+      }
       closeTop(); setTimeout(() => openAuth(b.dataset.am), 60);
     });
     f.addEventListener('submit', async ev => {
@@ -1487,9 +1690,10 @@
       try {
         if (signup) {
           SYNC.consentAt = new Date().toISOString(); saveSync();
+          track('signup', { provider: 'email' });
           const ok = await C.signUp(email, pass, { name: (S.profile && S.profile.name) || '' });
           if (!ok) { $('.sheet-in', el).innerHTML = head('Vérifie tes e-mails') + '<div class="msg">On t’a envoyé un e-mail à <b>' + esc(email) + '</b>. Ouvre le lien pour activer ton compte : tu seras connecté automatiquement.</div><button class="btn primary" data-act="close">OK</button>'; return; }
-        } else await C.signIn(email, pass);
+        } else { await C.signIn(email, pass); track('login', { provider: 'email' }); }
         closeTop();
         await afterLogin();
       } catch (e) { showErr(e.message); btn.disabled = false; }
@@ -1559,7 +1763,7 @@
     const d = new Date(r.updated_at);
     const n = (r.data && Array.isArray(r.data.entries)) ? r.data.entries.length : 0;
     const when = d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }) + ' à ' + d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
-    const title = r.device === 'admin' ? 'Ton compte a été restauré' : fromLogin ? 'Une sauvegarde existe déjà' : 'Sauvegarde plus récente trouvée';
+    const title = r.device === 'admin' ? 'Ton compte a été mis à jour par l’administrateur' : fromLogin ? 'Une sauvegarde existe déjà' : 'Sauvegarde plus récente trouvée';
     actionSheet(title, [
       { label: 'Récupérer la sauvegarde en ligne', sub: 'Du ' + when + ' · ' + n + ' aliment' + (n > 1 ? 's' : '') + ' · remplace ce téléphone', icon: 'i-download', color: 'var(--brand)', run: () => { applyRemote(r.data, false, r.updated_at); toast('Sauvegarde récupérée'); } },
       { label: 'Fusionner les deux', sub: 'Garde tout ce qui est sur ce téléphone et en ligne', icon: 'i-copy', color: 'var(--water)', run: () => { applyRemote(r.data, true, r.updated_at); toast('Données fusionnées'); } },
@@ -1581,9 +1785,10 @@
     const link = await C.fromLink();
     if (link && link.error) toast(link.error);
     else if (link && link.type === 'recovery') { renderAll(); openNewPassword(); return; }
-    else if (link) { toast('Adresse confirmée : tu es connecté'); await afterLogin(); return; }
+    else if (link) { toast(link.type === 'oauth' ? 'Connecté avec Google' : 'Adresse confirmée : tu es connecté'); track('login', { provider: link.type === 'oauth' ? 'google' : 'email-link' }); await afterLogin(); checkMessages(); return; }
     if (!C.session) return;
     await sync({ push: !SYNC.lastPush });
+    setTimeout(checkMessages, 800);
     if (navigator.onLine) checkAdmin();
   }
 
@@ -1689,7 +1894,7 @@
       body = '';
       title = 'Bienvenue sur NutriScan';
       lead = 'Scanne tes produits, suis tes calories et tes protéines, et atteins ton objectif. On commence par calculer tes besoins : 4 questions.';
-      body += '<div class="field"><label for="ob_name">Ton prénom (facultatif)</label><input id="ob_name" type="text" data-ob-in="name" value="' + esc(d.name) + '" placeholder="ex. Inel" autocomplete="given-name"></div>';
+      body += '<div class="field"><label for="ob_name">Ton prénom (facultatif)</label><input id="ob_name" type="text" data-ob-in="name" value="' + esc(d.name) + '" placeholder="ex. Sarah" autocomplete="given-name"></div>';
       btn = 'Commencer';
     } else if (step === 'goal') {
       title = 'Quel est ton objectif ?';
@@ -1757,7 +1962,7 @@
     save(); closeOB(); renderAll();
     toast(edit ? 'Objectifs mis à jour : ' + fk(r.kcal) + ' kcal' : 'C’est parti ! Objectif : ' + fk(r.kcal) + ' kcal');
   }
-  function closeOB() { OB = null; $('#onboard').hidden = true; $('#onboard').innerHTML = ''; document.body.classList.toggle('locked', layers.length > 0); }
+  function closeOB() { OB = null; $('#onboard').hidden = true; $('#onboard').innerHTML = ''; document.body.classList.toggle('locked', layers.length > 0); setTimeout(askConsent, 900); }
   $('#onboard').addEventListener('click', e => {
     if (!OB) return;
     const s = e.target.closest('[data-ob-set]');
@@ -1835,6 +2040,7 @@
     importData: () => $('#importFile').click(),
     auth: b => openAuth(b.dataset.m),
     privacy: () => openPrivacy(),
+    about: () => openAbout(),
     privacyPush: () => openPrivacy(),
     syncNow: () => { sync({ push: true }).then(ok => toast(ok ? 'Sauvegardé en ligne' : (navigator.onLine ? (syncError || 'Sauvegarde impossible pour l’instant') : 'Hors ligne : ce sera envoyé au retour d’Internet'))); },
     syncPull: async () => { try { const r = await C.pull(); if (r) offerRemote(r); else toast('Aucune sauvegarde en ligne pour l’instant'); } catch (e) { toast(e.message); } },
@@ -1864,17 +2070,17 @@
     createCode: b => openCreate({ code: b.dataset.code, swap: true }),
     rescan: () => openScanner(true),
     scTorch: async b => {
-      if (!SC.torchF) return;
-      try { await SC.torchF.apply(!SC.torch); SC.torch = !SC.torch; b.classList.toggle('on', SC.torch); } catch (e) { toast('Lampe indisponible'); }
+      if (!SC.track) return;
+      try { await SC.track.applyConstraints({ advanced: [{ torch: !SC.torch }] }); SC.torch = !SC.torch; b.classList.toggle('on', SC.torch); } catch (e) { toast('Lampe indisponible'); }
     },
     scZoom: async b => {
-      if (!SC.zoomF) return;
-      try { const z = !SC.zoom; await SC.zoomF.apply(z ? Math.min(2, SC.zoomF.max()) : SC.zoomF.min()); SC.zoom = z; b.classList.toggle('on', z); } catch (e) { toast('Zoom indisponible'); }
+      if (!SC.track || !SC.caps || !SC.caps.zoom) return;
+      try { const z = !SC.zoom; await SC.track.applyConstraints({ advanced: [{ zoom: z ? Math.min(2, SC.caps.zoom.max) : (SC.caps.zoom.min || 1) }] }); SC.zoom = z; b.classList.toggle('on', z); } catch (e) { toast('Zoom indisponible'); }
     },
     scManual: () => { showManual(); setTimeout(() => $('#scCode').focus(), 50); },
     scTap: async () => {
-      const v = fixVideo();
-      if (v) { try { await v.play(); } catch (e) { /* rien */ } }
+      const v = SC.legacy ? $('#reader video') : $('#camVideo');
+      if (v) { v.muted = true; v.setAttribute('playsinline', ''); try { await v.play(); } catch (e) { /* rien */ } }
       setTimeout(() => {
         const ok = v && !v.paused && v.videoWidth > 0;
         $('#scTap').hidden = !!ok;
@@ -1905,6 +2111,7 @@
   function renderNet() { const b = $('#netBadge'); if (b) b.hidden = navigator.onLine; }
   window.addEventListener('offline', () => { renderNet(); refreshAccountStatus(); toast('Hors ligne : tout reste enregistré sur ton téléphone'); });
   window.addEventListener('online', () => {
+    flushTrack();
     renderNet();
     toast('De retour en ligne');
     resolvePending();
@@ -1915,11 +2122,11 @@
   // Changement de jour pendant que l'appli reste ouverte + coupure caméra en arrière-plan
   let lastToday = today();
   document.addEventListener('visibilitychange', () => {
-    if (document.hidden) { if (scannerOpen()) stopScan(); return; }
+    if (document.hidden) { if (scannerOpen()) stopScan(); flushTrack(); return; }
     const t = today();
     if (t !== lastToday) { if (day === lastToday) { day = t; weekStart = mondayOf(t); } lastToday = t; renderAll(); }
     if (scannerOpen() && !SC.running && !SC.handled && topLayer() && topLayer().kind === 'scanner') startScan();
-    if (navigator.onLine) { resolvePending(); if (C.session) sync({ quiet: false }); }
+    if (navigator.onLine) { resolvePending(); if (C.session) { sync({ quiet: false }); if (Date.now() - lastMsgCheck > 600000) setTimeout(checkMessages, 1500); } }
   });
   let resizeT;
   window.addEventListener('resize', () => { clearTimeout(resizeT); resizeT = setTimeout(() => { if (tab === 'progress') renderProgress(); }, 200); });
@@ -1929,12 +2136,14 @@
   applyTheme();
   renderAll();
   if (!S.profile && !S.skipSetup && !/access_token=/.test(location.hash)) openOnboarding(false);
+  else setTimeout(askConsent, 1500);
+  track('app_open', openInfo());
   cloudStart();
   if ('serviceWorker' in navigator && window.isSecureContext) navigator.serviceWorker.register('sw.js').catch(() => {});
   renderNet();
   if (navigator.onLine) setTimeout(resolvePending, 1500);
-  setTimeout(() => { loadScanLib().catch(() => {}); }, 2000);
+  setTimeout(warmScanner, 2000);
 
   // Accès pour les tests automatisés
-  window.__ns = { get state() { return S; }, lookupCode, openAddFood, openProduct, setDay };
+  window.__ns = { get state() { return S; }, lookupCode, openAddFood, openProduct, setDay, flush: flushTrack, sync };
 })();

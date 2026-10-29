@@ -18,7 +18,9 @@
     'Password should be at least 6 characters': 'Le mot de passe doit faire au moins 6 caractères.',
     'Unable to validate email address: invalid format': 'Adresse e-mail invalide.',
     'Email rate limit exceeded': 'Trop d’e-mails envoyés : réessaie dans une heure.',
-    'For security purposes, you can only request this after': 'Patiente quelques secondes avant de réessayer.'
+    'For security purposes, you can only request this after': 'Patiente quelques secondes avant de réessayer.',
+    'User is banned': 'Ce compte a été bloqué.',
+    'Unsupported provider': 'La connexion Google n’est pas encore activée.'
   };
   function frMsg(m) {
     m = String(m || '');
@@ -77,7 +79,7 @@
   // Lien reçu par e-mail (confirmation ou nouveau mot de passe) : #access_token=…&type=…
   async function fromLink() {
     const h = location.hash || '';
-    if (!/access_token=/.test(h)) { if (/error_description=/.test(h)) { const p = new URLSearchParams(h.slice(1)); try { history.replaceState(null, '', location.pathname + location.search); } catch (e) { /* rien */ } return { error: (p.get('error_description') || '').replace(/\+/g, ' ') }; } return null; }
+    if (!/access_token=/.test(h)) { if (/error_description=/.test(h)) { const p = new URLSearchParams(h.slice(1)); try { history.replaceState(null, '', location.pathname + location.search); } catch (e) { /* rien */ } return { error: frMsg((p.get('error_description') || '').replace(/\+/g, ' ')) }; } return null; }
     const p = new URLSearchParams(h.slice(1));
     try { history.replaceState(null, '', location.pathname + location.search); } catch (e) { /* rien */ }
     const tmp = { access_token: p.get('access_token'), refresh_token: p.get('refresh_token'), expires_in: +p.get('expires_in') || 3600 };
@@ -86,7 +88,7 @@
       const u = await r.json();
       if (!r.ok) throw new Error('lien');
       setSession(tmp, u);
-      return { type: p.get('type') || 'signup' };
+      return { type: p.get('type') || (p.get('provider_token') || !p.get('type') ? 'oauth' : 'signup') };
     } catch (e) { return { error: 'Ce lien a expiré : demande-en un nouveau.' }; }
   }
   // Sauvegarde
@@ -109,10 +111,13 @@
     await req('/rest/v1/backups?on_conflict=user_id', { method: 'POST', auth: true, headers: { Prefer: 'resolution=merge-duplicates,return=minimal' }, body });
     return body.updated_at;
   }
+  function oauth(provider, redirectTo) {
+    location.href = base + '/auth/v1/authorize?provider=' + encodeURIComponent(provider) + '&redirect_to=' + encodeURIComponent(redirectTo);
+  }
   async function deleteAccount() { await req('/rest/v1/rpc/delete_my_account', { method: 'POST', auth: true, body: {} }); write(null); }
 
   window.NS_CLOUDAPI = {
-    enabled, req, ensure, signUp, signIn, signOut, recover, updatePassword, fromLink, pull, meta, push, deleteAccount,
+    enabled, req, ensure, signUp, signIn, signOut, recover, updatePassword, fromLink, pull, meta, push, deleteAccount, oauth,
     get session() { return session; }, get user() { return session && session.user; }
   };
 })();

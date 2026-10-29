@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>NutriScan</title>
-<meta name="description" content="Compteur de calories et de macros avec scan de code-barres (Open Food Facts).">
+<meta name="description" content="Compteur de calories et de macros avec scan de code-barres.">
 <meta name="theme-color" id="themeColor" content="#F3F6F2">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
@@ -16,7 +16,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=Figtree:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="styles.css?v=2.4">
+<link rel="stylesheet" href="styles.css?v=2.5">
 </head>
 <body>
 
@@ -87,7 +87,6 @@
   <div id="meals" style="display:flex;flex-direction:column;gap:12px"></div>
   <section class="card" id="waterCard"></section>
   <section class="card" id="activityCard"></section>
-  <p class="credit">Produits : <a href="https://world.openfoodfacts.org" target="_blank" rel="noopener">Open Food Facts</a> (ODbL)</p>
 </main>
 
 <main class="screen" id="screen-progress" hidden></main>
@@ -104,7 +103,7 @@
 <div class="scrim" id="scrim"></div>
 
 <div class="scanner" id="scanner" hidden role="dialog" aria-modal="true" aria-label="Scanner un code-barres">
-  <div class="cam"><div id="reader"></div></div>
+  <div class="cam"><video id="camVideo" playsinline muted autoplay></video><div id="reader" hidden></div></div>
   <div class="scan-ui">
     <div class="scan-top">
       <button class="sbtn" data-act="close" aria-label="Fermer"><svg class="ic"><use href="#i-x"/></svg></button>
@@ -130,11 +129,11 @@
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 <input type="file" id="importFile" accept="application/json,.json" hidden>
 
-<script src="foods.js?v=2.4"></script>
-<script src="additives.js?v=2.4"></script>
-<script src="config.js?v=2.4"></script>
-<script src="cloud.js?v=2.4"></script>
-<script src="ingredients.js?v=2.4"></script>
-<script src="app.js?v=2.4"></script>
+<script src="foods.js?v=2.5"></script>
+<script src="additives.js?v=2.5"></script>
+<script src="config.js?v=2.5"></script>
+<script src="cloud.js?v=2.5"></script>
+<script src="ingredients.js?v=2.5"></script>
+<script src="app.js?v=2.5"></script>
 </body>
 </html>
