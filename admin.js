@@ -407,7 +407,6 @@
       return '<div class="two"><section class="panel"><h2>Goûts</h2>' + (pr ?
           '<div class="kv"><span>Alimentation</span><b>' + esc(DIETN[pr.diet] || pr.diet) + '</b></div>' +
           ((pr.avoid || []).length ? '<div class="kv"><span>Évite</span><b>' + esc(pr.avoid.join(', ')) + '</b></div>' : '') +
-          '<div class="kv"><span>Cuisines préférées</span><b>' + esc((pr.cuis || []).join(', ') || 'toutes') + '</b></div>' +
           '<div class="kv"><span>Temps max</span><b>' + (pr.time ? pr.time + ' min' : 'peu importe') + '</b></div><div class="kv"><span>Personnes</span><b>' + (pr.people || 1) + '</b></div>' +
           '<div class="kv"><span>Recettes favorites</span><b>' + esc((c.favs || []).map(id => (RCP[id] || {}).n || id).join(', ') || '—') + '</b></div>'
           : '<p class="hint">Questionnaire pas encore rempli.</p>') + '</section>' +

@@ -17,7 +17,7 @@
   const PAINS = [['k', 'Genoux'], ['b', 'Bas du dos'], ['s', 'Épaules'], ['w', 'Poignets']];
   const FOCUS = [['none', 'Équilibré'], ['upper', 'Haut du corps'], ['lower', 'Jambes'], ['glutes', 'Fessiers'], ['arms', 'Bras'], ['abs', 'Abdos']];
   const WD = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'];
-  const GROUPS = [['chest', 'Pectoraux', ['push_h', 'chest_iso']], ['back', 'Dos', ['pull_v', 'pull_h']], ['shoulders', 'Épaules', ['push_v', 'shoulder_iso', 'rear_delt']],
+  const GROUPS = [['chest', 'Pectoraux', ['push_h', 'chest_iso']], ['back', 'Dos', ['pull_v', 'pull_h']], ['shoulders', 'Épaules', ['push_v', 'shoulder_iso', 'rear_delt', 'traps']],
     ['arms', 'Bras', ['bi', 'tri']], ['legs', 'Jambes', ['squat', 'lunge', 'quad_iso', 'ham_iso', 'calf']], ['glutes', 'Fessiers et lombaires', ['glute', 'hinge']],
     ['abs', 'Abdos', ['core']], ['cardio', 'Cardio', ['cond', 'cardio']]];
   const S = () => A.S;

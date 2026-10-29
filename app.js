@@ -207,7 +207,7 @@
   const doPush = () => sync({ push: true });
 
   /* ---------- Statistiques et rapports d'erreurs (seulement avec l'accord de l'utilisateur) ---------- */
-  const VERSION = '3.0';
+  const VERSION = '3.1';
   const TQ_KEY = 'nutriscan.tq';
   let TQ = store.get(TQ_KEY, []);
   let consent = store.get('nutriscan.consent', null); // true, false, ou null = pas encore demandé
@@ -531,11 +531,12 @@
   /* ================= Couches (fiches, scanner) + bouton retour ================= */
   const layers = [];
   function syncLayers() {
-    layers.forEach((l, i) => { l.el.style.zIndex = String(31 + i * 2); });
+    const ob = !$('#onboard').hidden, base = ob ? 71 : 31; // au-dessus de l’écran de connexion / du questionnaire
+    layers.forEach((l, i) => { l.el.style.zIndex = String(base + i * 2); });
     const scrim = $('#scrim');
-    scrim.style.zIndex = String(30 + Math.max(0, layers.length - 1) * 2);
+    scrim.style.zIndex = String(base - 1 + Math.max(0, layers.length - 1) * 2);
     scrim.classList.toggle('show', layers.length > 0);
-    document.body.classList.toggle('locked', layers.length > 0);
+    document.body.classList.toggle('locked', layers.length > 0 || ob);
   }
   function mountSheet(inner, opts) {
     opts = opts || {};
@@ -1629,7 +1630,8 @@
       '<div class="setrow" style="border-top:0;padding-top:0"><span>Rapports d’erreurs et statistiques d’utilisation</span>' + seg + '</div>' +
       '<p class="hint">Ils servent à repérer et corriger les bugs (caméra, scans ratés, erreurs). Rien sur tes quantités, ton poids ou ta santé.</p>' +
       '<div class="prose">' + PRIVACY + '</div>' +
-      '<p class="hint">NutriScan ' + VERSION + '<br>Données produits : Open Food Facts, licence ODbL.</p>');
+      '<button class="linkbtn" data-act="termsPush">Conditions d’utilisation</button>' +
+      '<p class="hint">NutriScan ' + VERSION + '<br>Données produits : Open Food Facts, licence ODbL.<br>Photos des recettes : Pexels.</p>');
     openLayer({ el });
     el.addEventListener('click', ev => {
       const b = ev.target.closest('[data-ab]'); if (!b) return;
@@ -1681,6 +1683,15 @@
     const el = mountSheet(head('Confidentialité') + '<div class="prose">' + PRIVACY + '</div>');
     openLayer({ el }, swap);
   }
+  const TERMS = '<p>NutriScan est une appli gratuite pour noter ce que tu manges, suivre ton poids et t’entraîner.</p>' +
+    '<p>Les valeurs nutritionnelles viennent d’Open Food Facts ou de calculs approximatifs : elles peuvent contenir des erreurs. Vérifie toujours l’étiquette du produit, surtout en cas d’allergie.</p>' +
+    '<p>Les objectifs, programmes de sport et recettes sont donnés à titre indicatif et ne remplacent pas l’avis d’un médecin, d’un diététicien ou d’un coach. Si tu as un problème de santé, une grossesse ou une douleur, demande l’avis d’un professionnel avant de commencer.</p>' +
+    '<p>Ton compte est personnel : garde ton mot de passe pour toi. Tu peux supprimer ton compte et tes données à tout moment depuis Profil.</p>' +
+    '<p>L’appli peut évoluer ou être interrompue. Les comptes utilisés pour du spam ou des abus peuvent être suspendus.</p>';
+  function openTerms(swap) {
+    const el = mountSheet(head('Conditions d’utilisation') + '<div class="prose">' + TERMS + '</div>');
+    openLayer({ el }, swap);
+  }
   function openAuth(mode) {
     const signup = mode === 'signup';
     const el = mountSheet(head(signup ? 'Créer un compte' : 'Se connecter') +
@@ -1688,7 +1699,7 @@
       '<form id="authForm" class="stack" autocomplete="on" novalidate>' +
       '<div class="field"><label for="aEmail">E-mail</label><input id="aEmail" type="email" inputmode="email" autocomplete="email" placeholder="toi@exemple.com" required></div>' +
       '<div class="field"><label for="aPass">Mot de passe</label><input id="aPass" type="password" autocomplete="' + (signup ? 'new-password' : 'current-password') + '" placeholder="' + (signup ? '8 caractères minimum' : '') + '" required></div>' +
-      '<label class="check"><input type="checkbox" id="aConsent"><span>' + (signup ? '' : 'Première connexion ? ') + 'J’accepte que mes données NutriScan (repas, poids, objectifs, réglages) soient sauvegardées en ligne et consultables par l’administrateur de l’appli pour pouvoir restaurer mon compte. Je peux supprimer mon compte à tout moment. <button type="button" class="linkbtn" data-act="privacyPush">En savoir plus</button></span></label>' +
+      '<label class="check"><input type="checkbox" id="aConsent"><span>' + (signup ? '' : 'Première connexion ? ') + 'J’accepte les <button type="button" class="linkbtn" data-act="termsPush">conditions d’utilisation</button> et la <button type="button" class="linkbtn" data-act="privacyPush">politique de confidentialité</button>.</span></label>' +
       '<p class="hint err" id="aErr" hidden></p>' +
       '<button class="btn primary" type="submit" id="aSubmit">' + (signup ? 'Créer mon compte' : 'Se connecter') + '</button>' +
       (signup ? '<button type="button" class="linkbtn" data-am="login">Déjà un compte ? Se connecter</button>' :
@@ -1697,6 +1708,9 @@
     openLayer({ el }, mode && mode.swap);
     const f = $('#authForm', el), err = $('#aErr', el), btn = $('#aSubmit', el);
     const showErr = m => { err.textContent = m; err.hidden = !m; };
+    const gBtn = $('[data-am=google]', el), cBox = $('#aConsent', el);
+    const syncBtns = () => { if (signup) btn.disabled = !cBox.checked; if (gBtn) gBtn.disabled = !cBox.checked; if (cBox.checked) showErr(''); };
+    cBox.addEventListener('change', syncBtns); syncBtns();
     el.addEventListener('click', ev => {
       const b = ev.target.closest('[data-am]'); if (!b) return;
       if (b.dataset.am === 'forgot') {
@@ -1706,7 +1720,7 @@
         return;
       }
       if (b.dataset.am === 'google') {
-        if (!$('#aConsent', el).checked) { showErr('Coche la case pour accepter la sauvegarde en ligne.'); return; }
+        if (!$('#aConsent', el).checked) { showErr('Accepte les conditions d’utilisation pour continuer.'); return; }
         SYNC.consentAt = new Date().toISOString(); saveSync();
         track('login_start', { provider: 'google' }); flushTrack();
         C.oauth('google', location.origin + location.pathname);
@@ -1720,7 +1734,7 @@
       if (!/^\S+@\S+\.\S+$/.test(email)) { showErr('Adresse e-mail invalide.'); return; }
       if (signup && pass.length < 8) { showErr('Choisis un mot de passe d’au moins 8 caractères.'); return; }
       if (!pass) { showErr('Tape ton mot de passe.'); return; }
-      if (signup && !$('#aConsent', el).checked) { showErr('Coche la case pour accepter la sauvegarde en ligne.'); return; }
+      if (signup && !$('#aConsent', el).checked) { showErr('Accepte les conditions d’utilisation pour continuer.'); return; }
       btn.disabled = true; showErr('');
       try {
         if (signup) {
@@ -1844,9 +1858,10 @@
     const g = GATE, box = $('#onboard');
     const google = !!(window.NS_CLOUD && window.NS_CLOUD.google);
     const off = !navigator.onLine ? '<div class="msg err">Pas de connexion Internet. Connecte-toi au Wi-Fi ou aux données mobiles pour créer ton compte (seulement la première fois : ensuite l’appli marche hors ligne).</div>' : '';
-    const consentBox = '<label class="check"><input type="checkbox" id="gConsent"' + (g.consent ? ' checked' : '') + '><span>J’accepte que mes données NutriScan (repas, poids, objectifs, réglages) soient sauvegardées en ligne et consultables par l’administrateur de l’appli pour pouvoir restaurer mon compte. Je peux supprimer mon compte à tout moment. <button type="button" class="linkbtn" data-g="privacy">En savoir plus</button></span></label>' +
-      '<label class="check"><input type="checkbox" id="gStats"' + (g.stats ? ' checked' : '') + '><span>Aider à améliorer l’appli : envoyer les rapports d’erreurs et des statistiques d’utilisation (facultatif, rien sur ton poids ni tes repas).</span></label>';
-    const googleBtn = google ? '<button class="btn outline block gbtn" data-g="google"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M21.6 12.2c0-.7-.1-1.4-.2-2H12v3.8h5.4a4.6 4.6 0 0 1-2 3v2.5h3.2c1.9-1.7 3-4.3 3-7.3z" fill="#4285F4" stroke="none"/><path d="M12 22c2.7 0 5-.9 6.6-2.4l-3.2-2.5c-.9.6-2 1-3.4 1-2.6 0-4.8-1.8-5.6-4.1H3.1v2.6A10 10 0 0 0 12 22z" fill="#34A853" stroke="none"/><path d="M6.4 14c-.2-.6-.3-1.3-.3-2s.1-1.4.3-2V7.4H3.1A10 10 0 0 0 2 12c0 1.6.4 3.2 1.1 4.6L6.4 14z" fill="#FBBC05" stroke="none"/><path d="M12 5.9c1.5 0 2.8.5 3.8 1.5l2.9-2.9A10 10 0 0 0 3.1 7.4L6.4 10C7.2 7.7 9.4 5.9 12 5.9z" fill="#EA4335" stroke="none"/></svg>Continuer avec Google</button>' : '';
+    const consentBox = '<div class="legal">' +
+      '<label class="check"><input type="checkbox" id="gConsent"' + (g.consent ? ' checked' : '') + '><span>J’accepte les <button type="button" class="linkbtn" data-g="terms">conditions d’utilisation</button> et la <button type="button" class="linkbtn" data-g="privacy">politique de confidentialité</button>.</span></label>' +
+      '<label class="check"><input type="checkbox" id="gStats"' + (g.stats ? ' checked' : '') + '><span>Partager des statistiques d’utilisation pour améliorer l’appli (facultatif).</span></label></div>';
+    const googleBtn = google ? '<button class="btn outline block gbtn" data-g="google"' + (g.consent ? '' : ' disabled') + '><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M21.6 12.2c0-.7-.1-1.4-.2-2H12v3.8h5.4a4.6 4.6 0 0 1-2 3v2.5h3.2c1.9-1.7 3-4.3 3-7.3z" fill="#4285F4" stroke="none"/><path d="M12 22c2.7 0 5-.9 6.6-2.4l-3.2-2.5c-.9.6-2 1-3.4 1-2.6 0-4.8-1.8-5.6-4.1H3.1v2.6A10 10 0 0 0 12 22z" fill="#34A853" stroke="none"/><path d="M6.4 14c-.2-.6-.3-1.3-.3-2s.1-1.4.3-2V7.4H3.1A10 10 0 0 0 2 12c0 1.6.4 3.2 1.1 4.6L6.4 14z" fill="#FBBC05" stroke="none"/><path d="M12 5.9c1.5 0 2.8.5 3.8 1.5l2.9-2.9A10 10 0 0 0 3.1 7.4L6.4 10C7.2 7.7 9.4 5.9 12 5.9z" fill="#EA4335" stroke="none"/></svg>Continuer avec Google</button>' : '';
     const err = '<p class="hint err" id="gErr"' + (g.err ? '' : ' hidden') + '>' + esc(g.err) + '</p>' + (g.info ? '<div class="msg">' + esc(g.info) + '</div>' : '');
     let title, lead, body;
     if (g.mode === 'login' || g.mode === 'signup') {
@@ -1857,7 +1872,7 @@
         '<div class="field"><label for="gEmail">E-mail</label><input id="gEmail" type="email" inputmode="email" autocomplete="email" placeholder="toi@exemple.com" value="' + esc(g.email) + '"></div>' +
         '<div class="field"><label for="gPass">Mot de passe</label><input id="gPass" type="password" autocomplete="' + (su ? 'new-password' : 'current-password') + '" placeholder="' + (su ? '8 caractères minimum' : '') + '"></div>' +
         (su ? consentBox : '') + err +
-        '<button class="btn primary block" type="submit" id="gSubmit">' + (su ? 'Créer mon compte' : 'Se connecter') + '</button></form>' +
+        '<button class="btn primary block" type="submit" id="gSubmit"' + (su && !g.consent ? ' disabled' : '') + '>' + (su ? 'Créer mon compte' : 'Se connecter') + '</button></form>' +
         (su ? '<button class="linkbtn" data-g="login">J’ai déjà un compte</button>' : '<div class="row-btns"><button class="linkbtn" data-g="signup">Créer un compte</button><button class="linkbtn" data-g="forgot">Mot de passe oublié ?</button></div>');
     } else if (g.mode === 'forgot') {
       title = 'Mot de passe oublié';
@@ -1885,7 +1900,7 @@
     if (!/^\S+@\S+\.\S+$/.test(email)) { gateErr('Adresse e-mail invalide.'); return; }
     if (su && pass.length < 8) { gateErr('Choisis un mot de passe d’au moins 8 caractères.'); return; }
     if (!pass) { gateErr('Tape ton mot de passe.'); return; }
-    if (su && !g.consent) { gateErr('Coche la case pour accepter la sauvegarde en ligne.'); return; }
+    if (su && !g.consent) { gateErr('Accepte les conditions d’utilisation pour continuer.'); return; }
     const btn = $('#gSubmit'); if (btn) btn.disabled = true; gateErr('');
     try {
       if (su) {
@@ -1900,16 +1915,24 @@
     } catch (e) { gateErr(e.message); if (btn) btn.disabled = false; }
   }
   $('#onboard').addEventListener('submit', e => { if (e.target.id === 'gForm') { e.preventDefault(); gateSubmit(); } });
-  $('#onboard').addEventListener('change', e => { if (GATE && (e.target.id === 'gConsent' || e.target.id === 'gStats')) gateRead(); });
+  $('#onboard').addEventListener('change', e => {
+    if (!GATE || (e.target.id !== 'gConsent' && e.target.id !== 'gStats')) return;
+    gateRead();
+    const s = $('#gSubmit'), gb = $('#onboard [data-g=google]');
+    if (s && GATE.mode === 'signup') s.disabled = !GATE.consent;
+    if (gb) gb.disabled = !GATE.consent;
+    if (GATE.consent) gateErr('');
+  });
   $('#onboard').addEventListener('click', e => {
     if (!GATE) return;
     const b = e.target.closest('[data-g]'); if (!b) return;
     e.preventDefault(); gateRead();
     const a = b.dataset.g;
     if (a === 'privacy') { openPrivacy(); return; }
+    if (a === 'terms') { openTerms(); return; }
     if (a === 'google') {
       if (!navigator.onLine) { gateErr('Pas de connexion Internet.'); return; }
-      if (!GATE.consent) { gateErr('Coche la case pour accepter la sauvegarde en ligne.'); return; }
+      if (!GATE.consent) { gateErr('Accepte les conditions d’utilisation pour continuer.'); return; }
       SYNC.consentAt = new Date().toISOString(); saveSync(); setConsent(GATE.stats);
       track('login_start', { provider: 'google' }); flushTrack();
       C.oauth('google', location.origin + location.pathname);
@@ -2212,6 +2235,7 @@
     privacy: () => openPrivacy(),
     about: () => openAbout(),
     privacyPush: () => openPrivacy(),
+    termsPush: () => openTerms(),
     syncNow: () => { sync({ push: true }).then(ok => toast(ok ? 'Sauvegardé en ligne' : (navigator.onLine ? (syncError || 'Sauvegarde impossible pour l’instant') : 'Hors ligne : ce sera envoyé au retour d’Internet'))); },
     syncPull: async () => { try { const r = await C.pull(); if (r) offerRemote(r); else toast('Aucune sauvegarde en ligne pour l’instant'); } catch (e) { toast(e.message); } },
     newPassword: () => openNewPassword(),

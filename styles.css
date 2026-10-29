@@ -457,6 +457,9 @@ code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:
 .gate .linkbtn{align-self:center;padding:8px}
 .gate .row-btns{justify-content:space-between}
 .gate .msg.err{color:var(--danger)}
+.legal{display:flex;flex-direction:column;gap:10px;margin-top:2px}
+.legal .check{font-size:12.5px}
+.gate .check .linkbtn,.check .linkbtn{display:inline;padding:0;align-self:auto;font-size:inherit;font-weight:600;color:var(--ink);text-decoration:underline;text-underline-offset:2px}
 .j-top .iconbtn{align-self:center}
 .j-top .iconbtn.add{background:var(--brand);color:var(--brand-ink);box-shadow:0 6px 14px rgba(28,138,87,.3)}
 .j-top .iconbtn.add svg.ic{stroke-width:2.4}
@@ -538,12 +541,15 @@ code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:
 .ml-hero{display:flex;flex-direction:column;gap:10px}
 .rc{display:flex;align-items:center;gap:12px;width:100%;border:0;background:none;text-align:left;padding:9px 0;border-top:1px solid var(--line);color:var(--ink)}
 .card .rc:first-of-type,.flabel+.rc{border-top:0}
-.rc-emo{width:48px;height:48px;border-radius:14px;background:var(--surface-2);display:grid;place-items:center;font-size:26px;flex:none}
+.rc-emo{position:relative;overflow:hidden;width:60px;height:60px;border-radius:16px;background:var(--surface-2);display:grid;place-items:center;font-size:28px;flex:none}
+.rc-emo img,.rc-hero img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:0;transition:opacity .25s}
+.rc-emo img.on,.rc-hero img.on{opacity:1}
 .rc b{display:block;font-weight:700;font-size:15px}
 .rc small{display:block;color:var(--muted);font-size:13px}
 .rc .fav{color:var(--burn);width:14px;height:14px;vertical-align:-2px}
 .rc-top{display:flex;align-items:center;justify-content:space-between}
-.rc-hero{height:120px;border-radius:22px;background:linear-gradient(155deg,var(--brand-soft),var(--surface-2));display:grid;place-items:center;font-size:64px}
+.rc-hero{position:relative;overflow:hidden;height:120px;border-radius:22px;background:linear-gradient(155deg,var(--brand-soft),var(--surface-2));display:grid;place-items:center;font-size:64px}
+.rc-hero.ph{height:auto;aspect-ratio:16/9;max-height:260px}
 .rc-title{font:800 24px/1.15 var(--display);letter-spacing:-.02em}
 .rc-sec{display:flex;flex-direction:column;gap:10px}
 .rc-sec h3{font:800 17px/1.2 var(--display)}
