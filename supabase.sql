@@ -82,6 +82,122 @@ end $$;
 revoke all on function public.delete_my_account() from public, anon;
 grant execute on function public.delete_my_account() to authenticated;
 
--- 7. APRÈS avoir créé ton compte dans l'appli, lance cette ligne pour devenir admin
+-- 7. Suivi de l'appli (seulement pour les utilisateurs qui ont accepté) : erreurs, scans, ouvertures…
+create table if not exists public.events (
+  id bigserial primary key,
+  created_at timestamptz not null default now(),
+  user_id uuid references auth.users(id) on delete set null,
+  device text not null,
+  type text not null,
+  data jsonb,
+  version text,
+  ua text,
+  constraint events_small check (octet_length(coalesce(data::text, '')) < 4000 and length(type) < 40 and length(device) < 80)
+);
+create index if not exists events_created on public.events (created_at desc);
+create index if not exists events_user on public.events (user_id, created_at desc);
+create index if not exists events_type on public.events (type, created_at desc);
+alter table public.events enable row level security;
+drop policy if exists "events_insert" on public.events;
+drop policy if exists "events_select" on public.events;
+drop policy if exists "events_delete" on public.events;
+create policy "events_insert" on public.events for insert to anon, authenticated with check (user_id is null or user_id = auth.uid());
+create policy "events_select" on public.events for select to authenticated using (public.is_admin());
+create policy "events_delete" on public.events for delete to authenticated using (public.is_admin());
+grant insert on public.events to anon, authenticated;
+grant usage, select on sequence public.events_id_seq to anon, authenticated;
+grant select, delete on public.events to authenticated;
+
+-- 8. Notes de l'admin sur chaque utilisateur
+create table if not exists public.user_admin (
+  user_id uuid primary key references auth.users(id) on delete cascade,
+  note text,
+  flagged boolean not null default false,
+  updated_at timestamptz not null default now()
+);
+alter table public.user_admin enable row level security;
+drop policy if exists "user_admin_all" on public.user_admin;
+create policy "user_admin_all" on public.user_admin for all to authenticated using (public.is_admin()) with check (public.is_admin());
+grant select, insert, update, delete on public.user_admin to authenticated;
+
+-- 9. Messages de l'admin (à un utilisateur, ou à tous si user_id est vide)
+create table if not exists public.messages (
+  id bigserial primary key,
+  user_id uuid references auth.users(id) on delete cascade,
+  title text not null,
+  body text not null,
+  created_at timestamptz not null default now()
+);
+create table if not exists public.message_reads (
+  message_id bigint not null references public.messages(id) on delete cascade,
+  user_id uuid not null references auth.users(id) on delete cascade,
+  read_at timestamptz not null default now(),
+  primary key (message_id, user_id)
+);
+alter table public.messages enable row level security;
+alter table public.message_reads enable row level security;
+drop policy if exists "messages_select" on public.messages;
+drop policy if exists "messages_admin" on public.messages;
+drop policy if exists "reads_own" on public.message_reads;
+drop policy if exists "reads_admin" on public.message_reads;
+create policy "messages_select" on public.messages for select to authenticated using (user_id is null or user_id = auth.uid() or public.is_admin());
+create policy "messages_admin" on public.messages for all to authenticated using (public.is_admin()) with check (public.is_admin());
+create policy "reads_own" on public.message_reads for all to authenticated using (user_id = auth.uid()) with check (user_id = auth.uid());
+create policy "reads_admin" on public.message_reads for select to authenticated using (public.is_admin());
+grant select, insert, update, delete on public.messages to authenticated;
+grant usage, select on sequence public.messages_id_seq to authenticated;
+grant select, insert, delete on public.message_reads to authenticated;
+
+-- 10. Gestion des comptes par l'admin
+create or replace function public.admin_users()
+returns table (id uuid, email text, provider text, created_at timestamptz, last_sign_in_at timestamptz, banned_until timestamptz,
+               name text, entries_count int, updated_at timestamptz, consent_at timestamptz, note text, flagged boolean)
+language plpgsql stable security definer set search_path = public, auth as $$
+begin
+  if not public.is_admin() then raise exception 'Accès réservé à l''administrateur'; end if;
+  return query
+    select u.id, u.email::text, coalesce(u.raw_app_meta_data->>'provider', 'email')::text, u.created_at, u.last_sign_in_at, u.banned_until,
+           b.name, b.entries_count, b.updated_at, b.consent_at, a.note, coalesce(a.flagged, false)
+    from auth.users u
+    left join public.backups b on b.user_id = u.id
+    left join public.user_admin a on a.user_id = u.id
+    order by coalesce(b.updated_at, u.last_sign_in_at, u.created_at) desc;
+end $$;
+
+create or replace function public.admin_set_ban(target uuid, ban boolean) returns void
+language plpgsql security definer set search_path = public, auth as $$
+begin
+  if not public.is_admin() then raise exception 'Accès réservé à l''administrateur'; end if;
+  if target = auth.uid() then raise exception 'Tu ne peux pas bloquer ton propre compte'; end if;
+  -- même durée que le blocage de Supabase (100 ans) : une date infinie n'est pas lue par le service de connexion
+  update auth.users set banned_until = case when ban then now() + interval '100 years' else null end where id = target;
+end $$;
+
+create or replace function public.admin_delete_user(target uuid) returns void
+language plpgsql security definer set search_path = public, auth as $$
+begin
+  if not public.is_admin() then raise exception 'Accès réservé à l''administrateur'; end if;
+  if target = auth.uid() then raise exception 'Tu ne peux pas supprimer ton propre compte d''ici'; end if;
+  delete from auth.users where id = target;
+end $$;
+
+revoke all on function public.admin_users() from public, anon;
+revoke all on function public.admin_set_ban(uuid, boolean) from public, anon;
+revoke all on function public.admin_delete_user(uuid) from public, anon;
+grant execute on function public.admin_users() to authenticated;
+grant execute on function public.admin_set_ban(uuid, boolean) to authenticated;
+grant execute on function public.admin_delete_user(uuid) to authenticated;
+
+-- 11. Nettoyage automatique : le suivi de plus de 180 jours est effacé de temps en temps
+create or replace function public.events_cleanup() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  if random() < 0.01 then delete from public.events where created_at < now() - interval '180 days'; end if;
+  return null;
+end $$;
+drop trigger if exists events_cleanup on public.events;
+create trigger events_cleanup after insert on public.events for each statement execute function public.events_cleanup();
+
+-- 12. APRÈS avoir créé ton compte dans l'appli, lance cette ligne pour devenir admin
 --    (remplace l'adresse par celle de ton compte) :
 -- insert into public.admins (user_id) select id from auth.users where email = 'ton.email@exemple.com';

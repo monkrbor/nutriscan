@@ -7,17 +7,18 @@ Appli en ligne : **https://monkrbor.github.io/nutriscan/**
 
 - **Calcul de tes besoins** au premier lancement : objectif (perdre, garder, prendre), âge, taille, poids, activité → calories, protéines, glucides, lipides et eau par jour
 - **Journal du jour** : anneau des calories restantes (mangé / restant / brûlé), barres de macros, 4 repas avec objectif par repas, navigation par semaine, série de jours suivis
-- **Scanner plein écran** : détection automatique du code-barres, lampe, zoom ×2, saisie manuelle du code en secours
+- **Scanner plein écran** : lecteur natif du téléphone (Android) ou moteur ZXing en WebAssembly (iPhone), lecture de la zone du cadre en haute définition, vérification de la clé de contrôle du code-barres, lampe, zoom ×2, saisie manuelle du code en secours
 - **Fiche produit** : Nutri-Score, quantité en grammes ou en portions, répartition des macros, % de ton objectif, tableau nutritionnel complet, favoris
-- **Recherche** : 3 millions de produits du commerce (Open Food Facts) + 75 aliments courants (fruits, féculents, viandes…) qui marchent sans connexion
+- **Recherche** : des millions de produits du commerce + 75 aliments courants (fruits, féculents, viandes…) qui marchent sans connexion
 - **Récents, favoris, mes aliments**, ajout en un clic avec le bouton +
 - **Ajout rapide** (juste les calories), **création d'aliments** (un code-barres inconnu est reconnu ensuite)
 - **Reprendre le repas d'hier**, vider un repas, modifier ou supprimer chaque aliment
 - **Avertissements au scan** (sans aucun verdict) : en rouge ce que le produit contient (porc, gélatine, alcool même en trace comme le vinaigre de vin ou l'extrait de vanille, sang, additif à éviter) ; en orange ce qui est à vérifier (viande dont l'abattage n'est pas précisé, origine animale possible comme E471 ou présure, additifs à limiter, huile de palme, édulcorants, allergènes, traces). Réglables dans Profil
 - **Végan / végétarien** sur chaque produit
 - **Détail de chaque additif E** (≈ 250 additifs) : nom, rôle, origine, info santé ; ingrédients surlignés
-- **Comptes et sauvegarde en ligne** (Supabase) avec consentement, sauvegarde automatique, récupération sur un autre téléphone, suppression du compte
-- **Page admin** (`admin.html`) : liste des comptes, détail, téléchargement, versions précédentes, restauration
+- **Comptes** par e-mail + mot de passe ou avec Google, **sauvegarde en ligne** (Supabase) avec consentement, sauvegarde automatique, récupération sur un autre téléphone, suppression du compte
+- **Statistiques et rapports d'erreurs** seulement si l'utilisateur accepte au premier lancement (modifiable dans Profil → À propos)
+- **Panneau admin** (`admin.html`) : vue d'ensemble (comptes, appareils actifs, réussite des scans, erreurs), gestion des utilisateurs (bloquer, débloquer, supprimer, lien de mot de passe, note privée, signalement, objectifs, sauvegardes et versions), erreurs regroupées, activité, messages aux utilisateurs
 - **Eau** (verres de 250 ml), **activités** (calories brûlées estimées, ajoutées au budget), **poids**
 - **Progrès** : calories sur 7 ou 30 jours, macros moyennes, courbe de poids, IMC, régularité
 - **Profil** : objectifs modifiables, thème clair / sombre / automatique, sauvegarde et restauration des données
@@ -31,10 +32,18 @@ Sans compte, les données restent sur le téléphone. Avec un compte, elles sont
 
 1. Crée un projet sur https://supabase.com (gratuit).
 2. SQL Editor → colle le contenu de `supabase.sql` → Run.
-3. Authentication → Sign In / Providers → Email : désactive « Confirm email » (ou règle l'URL du site sur l'adresse de l'appli).
-4. Mets le Project URL et la clé publique (anon / publishable) dans `config.js`.
-5. Crée ton compte dans l'appli, puis lance dans le SQL Editor la ligne `insert into public.admins …` (fin de `supabase.sql`) avec ton e-mail.
-6. Ouvre `admin.html`.
+3. Authentication → Sign In / Providers → Email : désactive « Confirm email ».
+4. Authentication → URL Configuration : Site URL et Redirect URLs = `https://monkrbor.github.io/nutriscan/` (ajoute aussi `https://monkrbor.github.io/nutriscan/admin.html`).
+5. Mets le Project URL et la clé publique (anon / publishable) dans `config.js`. Jamais la clé `service_role` / secrète.
+6. Crée ton compte dans l'appli, puis lance dans le SQL Editor la ligne `insert into public.admins …` (fin de `supabase.sql`) avec ton e-mail.
+7. Ouvre `admin.html`.
+
+### Connexion avec Google (facultatif)
+
+1. Sur https://console.cloud.google.com : crée un projet → API et services → Écran de consentement OAuth (externe) → Identifiants → Créer un ID client OAuth « Application Web ».
+2. URI de redirection autorisé : `https://<ton-projet>.supabase.co/auth/v1/callback`.
+3. Dans Supabase → Authentication → Sign In / Providers → Google : active, colle l'ID client et le code secret client.
+4. Dans `config.js`, ajoute `google: true`.
 
 ## Installer sur le téléphone
 
@@ -53,9 +62,8 @@ Sans compte, les données restent sur le téléphone. Avec un compte, elles sont
 | `ingredients.js` | Avertissements, végan / végétarien, allergènes, surlignage des ingrédients |
 | `config.js` | Adresse et clé publique Supabase |
 | `cloud.js` | Comptes et sauvegarde en ligne |
-| `admin.html`, `admin.js` | Page d'administration des sauvegardes |
+| `admin.html`, `admin.js` | Panneau d'administration (utilisateurs, statistiques, erreurs, messages) |
 | `supabase.sql` | Tables et règles de sécurité à créer dans Supabase |
 | `sw.js` | Mode hors ligne |
 | `manifest.webmanifest`, icônes | Installation sur l'écran d'accueil |
 
-Données produits : [Open Food Facts](https://world.openfoodfacts.org), licence ODbL.

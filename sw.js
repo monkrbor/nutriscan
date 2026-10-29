@@ -1,18 +1,18 @@
 // Service worker : NutriScan marche hors ligne.
 // - Fichiers de l'appli : réseau d'abord (pour recevoir les mises à jour), sinon la copie en cache.
-// - Module de scan et polices : gardés en cache pour scanner sans réseau.
+// - Modules de scan et polices : gardés en cache pour scanner sans réseau.
 // - Fiches et photos de produits déjà consultées : copie gardée pour les revoir hors ligne.
-const CACHE = 'nutriscan-v6';
+const CACHE = 'nutriscan-v7';
 const RUNTIME = 'nutriscan-rt-v1';
 const FILES = ['./', './index.html', './styles.css', './app.js', './foods.js', './additives.js', './ingredients.js', './config.js', './cloud.js',
   './manifest.webmanifest', './icon.svg', './icon-180.png', './icon-192.png', './icon-512.png'];
-const LIB = 'https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js';
+const LIBS = ['https://cdn.jsdelivr.net/npm/barcode-detector@3.0.7/dist/iife/ponyfill.min.js', 'https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js'];
 
 self.addEventListener('install', e => {
   e.waitUntil((async () => {
     const c = await caches.open(CACHE);
     await c.addAll(FILES).catch(() => {});
-    try { const r = await fetch(LIB, { mode: 'cors' }); if (r.ok) await c.put(LIB, r); } catch (err) { /* sera mis en cache au premier scan */ }
+    await Promise.all(LIBS.map(async u => { try { const r = await fetch(u, { mode: 'cors' }); if (r.ok) await c.put(u, r); } catch (err) { /* sera mis en cache au premier scan */ } }));
   })());
   self.skipWaiting();
 });
@@ -49,8 +49,8 @@ self.addEventListener('fetch', e => {
   const req = e.request;
   if (req.method !== 'GET') return;
   const url = new URL(req.url);
-  // Module de scan
-  if (/html5-qrcode@2\.3\.8/.test(url.href)) { e.respondWith(cacheFirst(req, CACHE)); return; }
+  // Modules de scan (lecteur de code-barres et son moteur WebAssembly)
+  if (/barcode-detector@3\.0\.7|zxing-wasm@|html5-qrcode@2\.3\.8/.test(url.href)) { e.respondWith(cacheFirst(req, CACHE)); return; }
   // Polices
   if (url.hostname === 'fonts.googleapis.com' || url.hostname === 'fonts.gstatic.com') { e.respondWith(cacheFirst(req, RUNTIME)); return; }
   // Photos de produits
@@ -58,7 +58,7 @@ self.addEventListener('fetch', e => {
     e.respondWith(cacheFirst(req, RUNTIME).then(r => { trim(RUNTIME, 400); return r; }).catch(() => new Response('', { status: 504 })));
     return;
   }
-  // Fiches et recherches Open Food Facts : en direct, avec la dernière copie si pas de réseau
+  // Fiches et recherches de produits : en direct, avec la dernière copie si pas de réseau
   if (/(^|\.)openfoodfacts\.org$/.test(url.hostname)) { e.respondWith(networkFirst(req, RUNTIME, 400)); return; }
   // Sauvegarde en ligne : jamais en cache
   if (/supabase\.co$/.test(url.hostname)) return;

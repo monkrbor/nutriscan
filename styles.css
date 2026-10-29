@@ -445,3 +445,5 @@ code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:
 
 /* ---------- Hors ligne ---------- */
 .j-top .net{margin-left:auto;margin-right:8px;display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:800;color:var(--warn-text);background:var(--warn-soft);border-radius:99px;padding:7px 11px;align-self:center}
+
+#camVideo{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block;background:#000}
