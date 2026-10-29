@@ -3,6 +3,9 @@
 (function () {
   'use strict';
 
+  /* Couleurs de l’appli au choix (Profil → Apparence) : [clé, nom, couleur de l’aperçu] */
+  const ACCENTS = [['vert', 'Vert', '#1C8A57'], ['ocean', 'Océan', '#1673B8'], ['lavande', 'Lavande', '#6D4AD6'], ['framboise', 'Framboise', '#D6336C'], ['graphite', 'Graphite', '#3C4A57']];
+
   /* ================= Outils ================= */
   const $ = (s, el) => (el || document).querySelector(s);
   const $$ = (s, el) => Array.from((el || document).querySelectorAll(s));
@@ -80,7 +83,8 @@
       water: s.water && typeof s.water === 'object' ? s.water : {},
       exercises: Array.isArray(s.exercises) ? s.exercises.filter(x => x && x.date) : [],
       weights: Array.isArray(s.weights) ? s.weights.filter(w => w && w.date && w.kg > 0) : [],
-      theme: ['auto', 'light', 'dark'].includes(s.theme) ? s.theme : 'auto',
+      theme: ['auto', 'light', 'dark', 'black'].includes(s.theme) ? s.theme : 'auto',
+      accent: ACCENTS.some(a => a[0] === s.accent) ? s.accent : 'vert',
       // Sport (préférences, programme, séances) et Repas (goûts, menu de la semaine, courses)
       sport: s.sport && typeof s.sport === 'object' ? s.sport : {},
       workouts: Array.isArray(s.workouts) ? s.workouts.filter(w => w && w.id && w.date) : [],
@@ -207,7 +211,7 @@
   const doPush = () => sync({ push: true });
 
   /* ---------- Statistiques et rapports d'erreurs (seulement avec l'accord de l'utilisateur) ---------- */
-  const VERSION = '3.1';
+  const VERSION = '3.2';
   const TQ_KEY = 'nutriscan.tq';
   let TQ = store.get(TQ_KEY, []);
   let consent = store.get('nutriscan.consent', null); // true, false, ou null = pas encore demandé
@@ -1577,7 +1581,9 @@
       accountHTML() +
       halalSettingsHTML() +
       '<section class="card"><div class="card-title"><h2>Apparence</h2></div><div class="seg">' +
-      [['auto', 'Automatique'], ['light', 'Clair'], ['dark', 'Sombre']].map(t => '<button data-act="theme" data-t="' + t[0] + '"' + (S.theme === t[0] ? ' class="on"' : '') + '>' + t[1] + '</button>').join('') + '</div></section>' +
+      [['auto', 'Auto'], ['light', 'Clair'], ['dark', 'Sombre'], ['black', 'Noir']].map(t => '<button data-act="theme" data-t="' + t[0] + '"' + (S.theme === t[0] ? ' class="on"' : '') + '>' + t[1] + '</button>').join('') + '</div>' +
+      '<div class="swatches" role="radiogroup" aria-label="Couleur de l’appli">' + ACCENTS.map(a => '<button class="swatch' + (S.accent === a[0] ? ' on' : '') + '" data-act="accent" data-a="' + a[0] + '" role="radio" aria-checked="' + (S.accent === a[0]) + '" style="color:' + a[2] + '"><i style="background:' + a[2] + '"><svg viewBox="0 0 24 24" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></i>' + a[1] + '</button>').join('') + '</div>' +
+      '<p class="hint" style="margin-top:10px">Noir : idéal pour les écrans OLED, économise la batterie.</p></section>' +
       '<section class="card"><div class="menu">' +
       '<button data-act="myFoods">' + ic('i-edit') + '<span class="grow">Mes aliments</span><small>' + nCustom + '</small>' + ic('i-right', 'sm') + '</button>' +
       '<button data-act="favList">' + ic('i-star') + '<span class="grow">Mes favoris</span><small>' + S.favorites.length + '</small>' + ic('i-right', 'sm') + '</button>' +
@@ -1797,7 +1803,7 @@
     const latest = (a.metaT || 0) >= (b.metaT || 0) ? a : b;
     o.profile = latest.profile || a.profile || b.profile;
     o.goals = latest.profile || !(a.profile || b.profile) ? latest.goals : (a.profile ? a.goals : b.goals);
-    o.warn = latest.warn; o.theme = latest.theme;
+    o.warn = latest.warn; o.theme = latest.theme; o.accent = latest.accent;
     o.metaT = Math.max(a.metaT || 0, b.metaT || 0);
     o.skipSetup = !!(a.skipSetup || b.skipSetup);
     return fixState(o);
@@ -1949,8 +1955,8 @@
   window.addEventListener('offline', () => { if (GATE) renderGate(); });
   // Déconnexion : on vide ce téléphone (tout est dans le compte) puis on revient à l'écran d'accès
   function resetLocal() {
-    const theme = S.theme;
-    suppressPush = true; S = fixState({ theme }); save(); suppressPush = false;
+    const theme = S.theme, accent = S.accent;
+    suppressPush = true; S = fixState({ theme, accent }); save(); suppressPush = false;
     SYNC.lastPush = null; SYNC.admin = false; SYNC.pending = false; SYNC.consentAt = null; saveSync();
     TMP.clear(); setDay(today()); switchTab('journal');
   }
@@ -2191,8 +2197,11 @@
     register(name, mod) { SCREENS[name] = mod; if (tab === name) renderAll(); }
   };
   function applyTheme() {
-    if (S.theme === 'light' || S.theme === 'dark') document.documentElement.setAttribute('data-theme', S.theme);
-    else document.documentElement.removeAttribute('data-theme');
+    const R = document.documentElement;
+    if (S.theme === 'light' || S.theme === 'dark' || S.theme === 'black') R.setAttribute('data-theme', S.theme);
+    else R.removeAttribute('data-theme');
+    if (S.accent && S.accent !== 'vert') R.setAttribute('data-accent', S.accent); else R.removeAttribute('data-accent');
+    try { localStorage.setItem('nutriscan.look', JSON.stringify({ t: S.theme, a: S.accent })); } catch (e) { /* stockage plein */ }
     const bg = getComputedStyle(document.documentElement).getPropertyValue('--bg').trim();
     if (bg) $('#themeColor').setAttribute('content', bg);
   }
@@ -2219,7 +2228,8 @@
     range: b => { range = +b.dataset.r; renderProgress(); },
     editGoals: () => openGoals(),
     editProfile: () => openOnboarding(!!S.profile),
-    theme: b => { S.theme = b.dataset.t; touchMeta(); save(); applyTheme(); renderProfile(); },
+    theme: b => { S.theme = b.dataset.t; touchMeta(); save(); applyTheme(); renderAll(); },
+    accent: b => { S.accent = b.dataset.a; touchMeta(); save(); applyTheme(); renderAll(); track('accent', { a: S.accent }); },
     halalSet: b => {
       const k = b.dataset.k, v = b.dataset.v;
       S.warn[k] = k === 'on' ? v === 'true' : v; touchMeta();
@@ -2251,7 +2261,7 @@
       catch (e) { toast(e.message); }
     },
     wipe: () => {
-      const theme = S.theme, warn = S.warn; S = fixState({ theme, warn, metaT: now() }); suppressPush = true; save(); suppressPush = false; if (C.session) sync({ force: true, quiet: true }); TMP.clear(); setDay(today()); switchTab('journal'); toast('Toutes les données ont été effacées'); openOnboarding(false);
+      const theme = S.theme, accent = S.accent, warn = S.warn; S = fixState({ theme, accent, warn, metaT: now() }); suppressPush = true; save(); suppressPush = false; if (C.session) sync({ force: true, quiet: true }); TMP.clear(); setDay(today()); switchTab('journal'); toast('Toutes les données ont été effacées'); openOnboarding(false);
     },
     afMealPick: () => {
       if (!AF) return;

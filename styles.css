@@ -27,7 +27,7 @@
     color-scheme:dark;
   }
 }
-:root[data-theme="dark"]{
+:root[data-theme="dark"],:root[data-theme="black"]{
   --bg:#0D1210; --surface:#161D19; --surface-2:#1F2823; --surface-3:#29342E;
   --ink:#E8EFEA; --muted:#9AA69F; --faint:#6E7A73; --line:#26302A;
   --brand:#36B578; --brand-ink:#06120B; --brand-soft:#173526; --brand-text:#62D79C;
@@ -37,6 +37,28 @@
   --scrim:rgba(0,0,0,.62); --shadow:0 1px 2px rgba(0,0,0,.35); --shadow-lg:0 -10px 40px rgba(0,0,0,.55);
   color-scheme:dark;
 }
+/* Thème noir (écrans OLED) */
+:root[data-theme="black"]{ --bg:#000000; --surface:#0E0F0F; --surface-2:#191B1A; --surface-3:#242726; --line:#1F2221; --fig2:#4A5560; }
+/* Couleurs au choix (Profil → Apparence) */
+:root[data-accent="ocean"]{ --brand:#1673B8; --brand-ink:#FFFFFF; --brand-soft:#DCEBF7; --brand-text:#105C94; --hero-a:#2389D4; --hero-b:#0E4F80; }
+@media (prefers-color-scheme: dark){ :root[data-accent="ocean"]:not([data-theme="light"]){ --brand:#4AA3E8; --brand-ink:#04111C; --brand-soft:#132B3D; --brand-text:#7DBDF0; --hero-a:#1D6FAD; --hero-b:#0B3A5E; } }
+:root[data-theme="dark"][data-accent="ocean"],:root[data-theme="black"][data-accent="ocean"]{ --brand:#4AA3E8; --brand-ink:#04111C; --brand-soft:#132B3D; --brand-text:#7DBDF0; --hero-a:#1D6FAD; --hero-b:#0B3A5E; }
+:root[data-accent="lavande"]{ --brand:#6D4AD6; --brand-ink:#FFFFFF; --brand-soft:#ECE6FB; --brand-text:#5A38C2; --hero-a:#7C5BE6; --hero-b:#45279E; }
+@media (prefers-color-scheme: dark){ :root[data-accent="lavande"]:not([data-theme="light"]){ --brand:#9B82F5; --brand-ink:#0E0820; --brand-soft:#251C40; --brand-text:#B9A8FA; --hero-a:#6447C9; --hero-b:#2E1C6B; } }
+:root[data-theme="dark"][data-accent="lavande"],:root[data-theme="black"][data-accent="lavande"]{ --brand:#9B82F5; --brand-ink:#0E0820; --brand-soft:#251C40; --brand-text:#B9A8FA; --hero-a:#6447C9; --hero-b:#2E1C6B; }
+:root[data-accent="framboise"]{ --brand:#D6336C; --brand-ink:#FFFFFF; --brand-soft:#FBE3EC; --brand-text:#B4235A; --hero-a:#E5487F; --hero-b:#93174A; }
+@media (prefers-color-scheme: dark){ :root[data-accent="framboise"]:not([data-theme="light"]){ --brand:#F06595; --brand-ink:#1F0610; --brand-soft:#3B1726; --brand-text:#F78FB3; --hero-a:#C2306A; --hero-b:#6B1236; } }
+:root[data-theme="dark"][data-accent="framboise"],:root[data-theme="black"][data-accent="framboise"]{ --brand:#F06595; --brand-ink:#1F0610; --brand-soft:#3B1726; --brand-text:#F78FB3; --hero-a:#C2306A; --hero-b:#6B1236; }
+:root[data-accent="graphite"]{ --brand:#2F3A45; --brand-ink:#FFFFFF; --brand-soft:#E4E8EC; --brand-text:#2F3A45; --hero-a:#4A5A69; --hero-b:#1B232B; }
+@media (prefers-color-scheme: dark){ :root[data-accent="graphite"]:not([data-theme="light"]){ --brand:#C9D3DC; --brand-ink:#0D1114; --brand-soft:#252C33; --brand-text:#DCE3EA; --hero-a:#3B4855; --hero-b:#1A2128; } }
+:root[data-theme="dark"][data-accent="graphite"],:root[data-theme="black"][data-accent="graphite"]{ --brand:#C9D3DC; --brand-ink:#0D1114; --brand-soft:#252C33; --brand-text:#DCE3EA; --hero-a:#3B4855; --hero-b:#1A2128; }
+.swatches{display:flex;gap:12px;flex-wrap:wrap;margin-top:12px}
+.swatch{display:flex;flex-direction:column;align-items:center;gap:6px;border:0;background:none;padding:0;color:var(--muted);font-size:12px;font-weight:700;min-width:52px}
+.swatch i{width:40px;height:40px;border-radius:50%;display:grid;place-items:center;box-shadow:inset 0 0 0 1px rgba(0,0,0,.08);transition:transform .15s}
+.swatch i svg{width:18px;height:18px;stroke:#fff;stroke-width:3;opacity:0}
+.swatch.on{color:var(--ink)}
+.swatch.on i{transform:scale(1.08);box-shadow:0 0 0 3px var(--bg),0 0 0 5px currentColor}
+.swatch.on i svg{opacity:1}
 
 *{box-sizing:border-box}
 [hidden]{display:none!important}
@@ -584,3 +606,11 @@ code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:
 .inst b{display:block}
 .inst small{display:block;color:var(--muted);font-size:13px}
 .inst-n{font:800 18px/1 var(--display);color:var(--brand-text);width:18px;text-align:center}
+
+/* Ombres colorées qui suivent la couleur choisie */
+@supports (color: color-mix(in srgb, red 50%, transparent)) {
+  .hero{box-shadow:0 10px 30px color-mix(in srgb,var(--hero-b) 25%,transparent)}
+  .logo-big{box-shadow:0 12px 30px color-mix(in srgb,var(--hero-b) 30%,transparent)}
+  .fab{box-shadow:0 8px 18px color-mix(in srgb,var(--brand) 35%,transparent)}
+  .j-top .iconbtn.add{box-shadow:0 6px 14px color-mix(in srgb,var(--brand) 30%,transparent)}
+}

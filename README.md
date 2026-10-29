@@ -7,6 +7,7 @@ Appli en ligne : **https://monkrbor.github.io/nutriscan/**
 
 - **Compte obligatoire** dès l'ouverture : e-mail + mot de passe ou Google, avec accord pour la sauvegarde et (au choix) pour les statistiques
 - **Sport** : questionnaire (objectif, salle / maison / poids du corps, matériel, jours, durée, niveau, douleurs), programme sur mesure, séance guidée (séries, charges, minuteur de repos), progression automatique des charges, historique ; 189 exercices animés avec une silhouette neutre (aucune photo de personne)
+- **Thèmes** : clair, sombre, noir (OLED) ou automatique, et 5 couleurs au choix (vert, océan, lavande, framboise, graphite)
 - **Repas** : questionnaire de goûts, idées qui rentrent dans les calories restantes, 161 recettes pas à pas avec photo (portions ajustables, ajout au journal), menu de la semaine et liste de courses ; jamais de porc, d'alcool ni de sang
 - **Installer l'appli** : bouton d'installation (Android) et guide en 3 étapes (iPhone), raccourcis Scanner / Repas / Sport sur l'icône
 - **Calcul de tes besoins** au premier lancement : objectif (perdre, garder, prendre), âge, taille, poids, activité → calories, protéines, glucides, lipides et eau par jour
