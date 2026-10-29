@@ -3,7 +3,7 @@
 // - Modules de scan et polices : gardés en cache pour scanner sans réseau.
 // - Fiches et photos de produits déjà consultées : copie gardée pour les revoir hors ligne.
 // - Photos des recettes (Pexels) : copie gardée quand le site l'autorise, sinon affichées en direct.
-const CACHE = 'nutriscan-v9';
+const CACHE = 'nutriscan-v10';
 const RUNTIME = 'nutriscan-rt-v1';
 const PHOTOS = 'nutriscan-photos-v1';
 const FILES = ['./', './index.html', './styles.css', './app.js', './foods.js', './additives.js', './ingredients.js', './config.js', './cloud.js', './exercises.js', './figure.js', './recipes.js', './sport.js', './meals.js',
