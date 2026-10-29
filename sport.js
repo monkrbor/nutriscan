@@ -12,7 +12,7 @@
     ['strength', 'Gagner en force', 'Mouvements de base lourds, peu de répétitions', 'i-bolt', 'var(--carb)'],
     ['fit', 'Être en forme', 'Tout le corps, endurance et cardio', 'i-heart', 'var(--brand)']];
   const PLACES = [['gym', 'En salle de sport', 'Machines, poulies, barres, haltères'], ['home', 'À la maison avec du matériel', 'Haltères, élastiques, barre de traction…'], ['body', 'Au poids du corps', 'Sans matériel (une chaise suffit)']];
-  const EQUIP = [['db', 'Haltères'], ['bb', 'Barre et disques'], ['bench', 'Banc de musculation'], ['bar', 'Barre de traction'], ['kb', 'Kettlebell'], ['band', 'Élastiques']];
+  const EQUIP = [['db', 'Haltères'], ['bb', 'Barre et disques'], ['bench', 'Banc de musculation'], ['bar', 'Barre de traction'], ['kb', 'Kettlebell'], ['band', 'Élastiques'], ['step', 'Step ou marche'], ['rope', 'Corde à sauter'], ['ball', 'Ballon de gym'], ['wheel', 'Roue abdominale'], ['trx', 'Sangles de suspension']];
   const LEVELS = [[1, 'Débutant', 'Je commence ou je reprends'], [2, 'Intermédiaire', 'Je m’entraîne depuis plus de 6 mois'], [3, 'Avancé', 'Plus de 2 ans d’entraînement régulier']];
   const PAINS = [['k', 'Genoux'], ['b', 'Bas du dos'], ['s', 'Épaules'], ['w', 'Poignets']];
   const FOCUS = [['none', 'Équilibré'], ['upper', 'Haut du corps'], ['lower', 'Jambes'], ['glutes', 'Fessiers'], ['arms', 'Bras'], ['abs', 'Abdos']];
@@ -41,7 +41,7 @@
     shoulder_iso: ['push_v'], rear_delt: ['pull_h'], bi: ['pull_h'], tri: ['push_h'], glute: ['hinge'], lunge: ['squat', 'glute'], squat: ['lunge', 'glute'], cond: ['cardio'], calf: [], core: [], cardio: ['cond'] };
   const COMPOUND = new Set(['squat', 'hinge', 'lunge', 'push_h', 'push_v', 'pull_h', 'pull_v']);
   function eqOf(p) {
-    if (p.place === 'gym') return new Set(['body', 'bench', 'db', 'bb', 'bar', 'kb', 'band', 'machine', 'cable']);
+    if (p.place === 'gym') return new Set(['body', 'bench', 'db', 'bb', 'bar', 'kb', 'band', 'machine', 'cable', 'step', 'rope', 'ball', 'wheel', 'trx']);
     if (p.place === 'home') return new Set(['body', 'bench'].concat(p.equip || []));
     return new Set(['body', 'bench']);
   }
@@ -231,7 +231,7 @@
     const e = EXM[id]; if (!e) return;
     const last = lastSets(id);
     const el = A.mountSheet(A.head(e.n) + '<div class="fig-box" id="exFig"></div>' +
-      '<div class="tags"><span class="tag">' + esc(e.m) + '</span><span class="tag">' + ['', 'Débutant', 'Intermédiaire', 'Avancé'][e.lvl] + '</span>' + e.eq.filter(x => x !== 'body').map(x => '<span class="tag">' + esc(({ db: 'Haltères', bb: 'Barre', bench: e.eq.includes('body') ? 'Banc ou chaise' : 'Banc', bar: 'Barre de traction', kb: 'Kettlebell', band: 'Élastique', machine: 'Machine', cable: 'Poulie' })[x] || x) + '</span>').join('') + '</div>' +
+      '<div class="tags"><span class="tag">' + esc(e.m) + '</span><span class="tag">' + ['', 'Débutant', 'Intermédiaire', 'Avancé'][e.lvl] + '</span>' + e.eq.filter(x => x !== 'body').map(x => '<span class="tag">' + esc(({ db: 'Haltères', bb: 'Barre', bench: e.eq.includes('body') ? 'Banc ou chaise' : 'Banc', bar: 'Barre de traction', kb: 'Kettlebell', band: 'Élastique', machine: 'Machine', cable: 'Poulie', step: 'Step', rope: 'Corde à sauter', ball: 'Ballon de gym', wheel: 'Roue abdominale', trx: 'Sangles' })[x] || x) + '</span>').join('') + '</div>' +
       '<ol class="steps">' + e.how.map(h => '<li>' + esc(h) + '</li>').join('') + '</ol>' +
       '<div class="msg">' + ic('i-help', 'sm') + ' ' + esc(e.tip) + '</div>' +
       (last ? '<p class="hint">Dernière fois (' + esc(dayLabel(last.date)) + ') : ' + last.sets.map(s => num(s.r) + (num(s.kg) ? ' × ' + String(num(s.kg)).replace('.', ',') + ' kg' : '')).join(' · ') + '</p>' : ''));
