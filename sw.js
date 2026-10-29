@@ -2,9 +2,9 @@
 // - Fichiers de l'appli : réseau d'abord (pour recevoir les mises à jour), sinon la copie en cache.
 // - Modules de scan et polices : gardés en cache pour scanner sans réseau.
 // - Fiches et photos de produits déjà consultées : copie gardée pour les revoir hors ligne.
-const CACHE = 'nutriscan-v7';
+const CACHE = 'nutriscan-v8';
 const RUNTIME = 'nutriscan-rt-v1';
-const FILES = ['./', './index.html', './styles.css', './app.js', './foods.js', './additives.js', './ingredients.js', './config.js', './cloud.js',
+const FILES = ['./', './index.html', './styles.css', './app.js', './foods.js', './additives.js', './ingredients.js', './config.js', './cloud.js', './exercises.js', './figure.js', './recipes.js', './sport.js', './meals.js',
   './manifest.webmanifest', './icon.svg', './icon-180.png', './icon-192.png', './icon-512.png'];
 const LIBS = ['https://cdn.jsdelivr.net/npm/barcode-detector@3.0.7/dist/iife/ponyfill.min.js', 'https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js'];
 

@@ -81,6 +81,10 @@
       exercises: Array.isArray(s.exercises) ? s.exercises.filter(x => x && x.date) : [],
       weights: Array.isArray(s.weights) ? s.weights.filter(w => w && w.date && w.kg > 0) : [],
       theme: ['auto', 'light', 'dark'].includes(s.theme) ? s.theme : 'auto',
+      // Sport (préférences, programme, séances) et Repas (goûts, menu de la semaine, courses)
+      sport: s.sport && typeof s.sport === 'object' ? s.sport : {},
+      workouts: Array.isArray(s.workouts) ? s.workouts.filter(w => w && w.id && w.date) : [],
+      cook: s.cook && typeof s.cook === 'object' ? s.cook : {},
       warn: Object.assign({}, H.DEF, (s.warn && typeof s.warn === 'object') ? s.warn : (s.halal && typeof s.halal === 'object') ? s.halal : {}),
       // Synchronisation entre appareils : dates de modification et suppressions
       tomb: s.tomb && typeof s.tomb === 'object' ? s.tomb : {},
@@ -203,7 +207,7 @@
   const doPush = () => sync({ push: true });
 
   /* ---------- Statistiques et rapports d'erreurs (seulement avec l'accord de l'utilisateur) ---------- */
-  const VERSION = '2.5';
+  const VERSION = '3.0';
   const TQ_KEY = 'nutriscan.tq';
   let TQ = store.get(TQ_KEY, []);
   let consent = store.get('nutriscan.consent', null); // true, false, ou null = pas encore demandé
@@ -317,7 +321,7 @@
       (i.health ? '<p>' + esc(i.health) + '</p>' : '') + '</div>';
   }
   function extraHTML(p) {
-    if (p.source === 'gen' || p.source === 'custom' || p.source === 'quick') return '';
+    if (p.source === 'gen' || p.source === 'custom' || p.source === 'quick' || p.source === 'recipe') return '';
     const h = halalOf(p), adds = h.additives;
     let html = '';
     if (adds.length) html += '<section class="xcard"><div class="card-title"><h2>Additifs<span class="count">' + adds.length + '</span></h2></div><div class="adds">' + adds.map(addHTML).join('') + '</div></section>';
@@ -439,6 +443,8 @@
     $('#dayTitle').textContent = dayLabel(day);
     $('#streakN').textContent = streakCount();
     renderWeek(); renderHero(); renderMeals(); renderWater(); renderActivity();
+    const ib = $('#installBanner');
+    if (ib) { let hide = false; try { hide = !!localStorage.getItem('nutriscan.installHide'); } catch (e) { /* rien */ } ib.innerHTML = hide || !S.profile ? '' : installCardHTML(true); }
   }
   function renderWeek() {
     const t = today(), L = loggedDays(), letters = ['L', 'M', 'M', 'J', 'V', 'S', 'D'];
@@ -830,7 +836,7 @@
   function productHTML(ps) {
     const p = ps.p, n = p.per100, u = p.unit || 'g', portions = portionsOf(p);
     const isFav = S.favorites.includes(p.key);
-    const src = p.source === 'gen' ? 'Aliment courant' : p.source === 'custom' ? 'Mon aliment' : 'Produit';
+    const src = p.source === 'gen' ? 'Aliment courant' : p.source === 'custom' ? 'Mon aliment' : p.source === 'recipe' ? 'Recette' : 'Produit';
     const img = '<div class="ps-img">' + esc(p.name.charAt(0).toUpperCase()) + imgTag(p) + '</div>';
     const units = '<button class="chip" data-u="0">' + u + '</button>' + portions.map((x, i) => '<button class="chip" data-u="' + (i + 1) + '">' + esc(x.label) + ' · ' + f1(x.g) + ' ' + u + '</button>').join('');
     const row = (label, key, sub) => n[key] == null ? '' : '<div class="tr' + (sub ? ' sub' : '') + '"><span>' + label + '</span><span class="num">' + f1(n[key]) + (key === 'kcal' ? '' : ' g') + '</span><span class="num" data-q="' + key + '"></span></div>';
@@ -1519,6 +1525,34 @@
   }
 
   /* ================= Profil ================= */
+  /* ---------- Installer l'appli sur l'écran d'accueil ---------- */
+  let installEvt = null;
+  window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); installEvt = e; renderAll(); });
+  window.addEventListener('appinstalled', () => { installEvt = null; track('installed', {}); toast('NutriScan est installé'); renderAll(); });
+  const isStandalone = () => !!((window.matchMedia && matchMedia('(display-mode: standalone)').matches) || navigator.standalone);
+  const isIOS = () => /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  function installCardHTML(compact) {
+    if (isStandalone()) return '';
+    return '<section class="card install' + (compact ? ' compact' : '') + '"><span class="micon" style="--mc:var(--brand)">' + ic('i-download') + '</span><div class="min0"><b>Installer NutriScan</b><small>Une vraie icône sur ton écran d’accueil, en plein écran, même hors ligne.</small></div>' +
+      '<button class="btn primary" data-act="install">Installer</button>' + (compact ? '<button class="iconbtn ghost" data-act="installHide" aria-label="Plus tard">' + ic('i-x') + '</button>' : '') + '</section>';
+  }
+  async function doInstall() {
+    if (installEvt) {
+      installEvt.prompt();
+      try { const r = await installEvt.userChoice; track('install_prompt', { outcome: r && r.outcome }); } catch (e) { /* rien */ }
+      installEvt = null; renderAll(); return;
+    }
+    const ios = isIOS(), safari = /Safari/.test(navigator.userAgent) && !/CriOS|FxiOS|EdgiOS|Instagram|FBAN|FBAV/.test(navigator.userAgent);
+    const steps = ios ? [
+      [ic('i-upload'), 'Touche le bouton Partager', safari ? 'En bas de Safari (le carré avec une flèche vers le haut).' : 'Dans le menu de ton navigateur. Si tu ne le trouves pas, ouvre ce lien dans Safari.'],
+      [ic('i-plus'), 'Choisis « Sur l’écran d’accueil »', 'Fais défiler la liste si besoin.'],
+      [ic('i-check'), 'Touche « Ajouter »', 'NutriScan apparaît sur ton écran d’accueil comme une appli.']]
+      : [[ic('i-dots'), 'Ouvre le menu du navigateur', 'Les trois points en haut à droite.'], [ic('i-download'), 'Choisis « Installer l’appli »', 'Ou « Ajouter à l’écran d’accueil ».'], [ic('i-check'), 'Confirme', 'NutriScan apparaît avec tes autres applis.']];
+    const el = mountSheet(head('Installer NutriScan') + '<ol class="inst">' + steps.map((x, i) => '<li><span class="inst-n">' + (i + 1) + '</span><span class="micon sm" style="--mc:var(--brand)">' + x[0] + '</span><div class="min0"><b>' + esc(x[1]) + '</b><small>' + esc(x[2]) + '</small></div></li>').join('') + '</ol>' +
+      '<p class="hint">C’est gratuit, rien à télécharger depuis un store, et tes données restent dans ton compte.</p><button class="btn primary block" data-act="close">Compris</button>');
+    openLayer({ el });
+    track('install_help', { ios });
+  }
   function renderProfile() {
     const el = $('#screen-profile'), P = S.profile, g = S.goals;
     const lvl = P ? ACT_LEVELS.find(a => a.id === P.activity) : null;
@@ -1526,6 +1560,7 @@
     el.innerHTML =
       '<header class="p-head"><div class="avatar">' + esc(((P && P.name) || 'N').charAt(0).toUpperCase()) + '</div><div class="min0"><h1 class="page-title">' + esc((P && P.name) || 'Mon profil') + '</h1>' +
       '<p>' + (P ? esc(GOALS[P.goal] || '') + (P.goal !== 'maintain' && P.rate ? ' · ' + String(P.rate).replace('.', ',') + ' kg/sem.' : '') : 'Objectifs par défaut') + '</p></div></header>' +
+      installCardHTML() +
       (P ? '' : '<section class="card"><div class="card-title"><h2>Calcule tes besoins</h2></div><p class="hint" style="margin-bottom:12px">4 questions pour avoir un objectif de calories et de protéines adapté à toi.</p><button class="btn primary block" data-act="editProfile">Commencer</button></section>') +
       '<section class="card"><div class="card-title"><h2>Objectifs du jour</h2><button class="linkbtn" data-act="editGoals">Modifier</button></div>' +
       '<div class="goals5"><div class="tile"><b class="num">' + fk(g.kcal) + '</b><span>kcal</span></div>' +
@@ -1579,7 +1614,7 @@
       '<button data-act="syncPull">' + ic('i-download') + '<span class="grow">Récupérer ma sauvegarde en ligne</span></button>' +
       '<button data-act="newPassword">' + ic('i-edit') + '<span class="grow">Changer de mot de passe</span></button>' +
       '<button data-act="privacy">' + ic('i-help') + '<span class="grow">Confidentialité</span></button>' +
-      '<button data-act="logout">' + ic('i-left') + '<span class="grow">Se déconnecter</span></button>' +
+      '<button data-act="logout" data-confirm="Appuie encore pour te déconnecter">' + ic('i-left') + '<span class="grow">Se déconnecter</span></button>' +
       '<button class="danger" data-act="deleteAccount" data-confirm="Appuie encore : compte et sauvegarde supprimés">' + ic('i-trash') + '<span class="grow">Supprimer mon compte</span></button>' +
       '</div></section>';
   }
@@ -1732,6 +1767,9 @@
     o.entries = pick(a.entries, b.entries, e => e.id, 'e:');
     o.exercises = pick(a.exercises, b.exercises, e => e.id, 'x:');
     o.weights = pick(a.weights, b.weights, w => w.date, 'w:').sort((x, y) => x.date < y.date ? -1 : 1);
+    o.workouts = pick(a.workouts, b.workouts, w => w.id, 'k:');
+    o.sport = (a.sport.t || 0) >= (b.sport.t || 0) ? a.sport : b.sport;
+    o.cook = (a.cook.t || 0) >= (b.cook.t || 0) ? a.cook : b.cook;
     o.water = {}; o.waterT = {};
     new Set(Object.keys(a.water).concat(Object.keys(b.water), Object.keys(a.waterT), Object.keys(b.waterT))).forEach(d => {
       const ta = a.waterT[d] || 0, tb = b.waterT[d] || 0;
@@ -1779,17 +1817,119 @@
     else offerRemote(r, true);
     renderAll();
     checkAdmin();
+    if (!S.profile && !OB) openOnboarding(false);
   }
   async function cloudStart() {
     if (!C.enabled) return;
     const link = await C.fromLink();
-    if (link && link.error) toast(link.error);
+    if (link && link.error) { toast(link.error); if (needAuth()) openGate(); }
     else if (link && link.type === 'recovery') { renderAll(); openNewPassword(); return; }
-    else if (link) { toast(link.type === 'oauth' ? 'Connecté avec Google' : 'Adresse confirmée : tu es connecté'); track('login', { provider: link.type === 'oauth' ? 'google' : 'email-link' }); await afterLogin(); checkMessages(); return; }
+    else if (link) { closeGate(); toast(link.type === 'oauth' ? 'Connecté avec Google' : 'Adresse confirmée : tu es connecté'); track('login', { provider: link.type === 'oauth' ? 'google' : 'email-link' }); await afterLogin(); checkMessages(); return; }
     if (!C.session) return;
     await sync({ push: !SYNC.lastPush });
     setTimeout(checkMessages, 800);
     if (navigator.onLine) checkAdmin();
+  }
+
+  /* ================= Accès : un compte est obligatoire ================= */
+  let GATE = null;
+  const needAuth = () => C.enabled && !C.session;
+  function openGate(mode) {
+    GATE = Object.assign({ consent: false, stats: true, email: '' }, GATE || {}, { mode: mode || (GATE && GATE.mode) || 'start', err: '', info: '' });
+    OB = null; $('#onboard').hidden = false; document.body.classList.add('locked');
+    renderGate();
+  }
+  function closeGate() { if (!GATE) return; GATE = null; if (!OB) { $('#onboard').hidden = true; $('#onboard').innerHTML = ''; document.body.classList.toggle('locked', layers.length > 0); } }
+  function renderGate() {
+    const g = GATE, box = $('#onboard');
+    const google = !!(window.NS_CLOUD && window.NS_CLOUD.google);
+    const off = !navigator.onLine ? '<div class="msg err">Pas de connexion Internet. Connecte-toi au Wi-Fi ou aux données mobiles pour créer ton compte (seulement la première fois : ensuite l’appli marche hors ligne).</div>' : '';
+    const consentBox = '<label class="check"><input type="checkbox" id="gConsent"' + (g.consent ? ' checked' : '') + '><span>J’accepte que mes données NutriScan (repas, poids, objectifs, réglages) soient sauvegardées en ligne et consultables par l’administrateur de l’appli pour pouvoir restaurer mon compte. Je peux supprimer mon compte à tout moment. <button type="button" class="linkbtn" data-g="privacy">En savoir plus</button></span></label>' +
+      '<label class="check"><input type="checkbox" id="gStats"' + (g.stats ? ' checked' : '') + '><span>Aider à améliorer l’appli : envoyer les rapports d’erreurs et des statistiques d’utilisation (facultatif, rien sur ton poids ni tes repas).</span></label>';
+    const googleBtn = google ? '<button class="btn outline block gbtn" data-g="google"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M21.6 12.2c0-.7-.1-1.4-.2-2H12v3.8h5.4a4.6 4.6 0 0 1-2 3v2.5h3.2c1.9-1.7 3-4.3 3-7.3z" fill="#4285F4" stroke="none"/><path d="M12 22c2.7 0 5-.9 6.6-2.4l-3.2-2.5c-.9.6-2 1-3.4 1-2.6 0-4.8-1.8-5.6-4.1H3.1v2.6A10 10 0 0 0 12 22z" fill="#34A853" stroke="none"/><path d="M6.4 14c-.2-.6-.3-1.3-.3-2s.1-1.4.3-2V7.4H3.1A10 10 0 0 0 2 12c0 1.6.4 3.2 1.1 4.6L6.4 14z" fill="#FBBC05" stroke="none"/><path d="M12 5.9c1.5 0 2.8.5 3.8 1.5l2.9-2.9A10 10 0 0 0 3.1 7.4L6.4 10C7.2 7.7 9.4 5.9 12 5.9z" fill="#EA4335" stroke="none"/></svg>Continuer avec Google</button>' : '';
+    const err = '<p class="hint err" id="gErr"' + (g.err ? '' : ' hidden') + '>' + esc(g.err) + '</p>' + (g.info ? '<div class="msg">' + esc(g.info) + '</div>' : '');
+    let title, lead, body;
+    if (g.mode === 'login' || g.mode === 'signup') {
+      const su = g.mode === 'signup';
+      title = su ? 'Créer ton compte' : 'Content de te revoir';
+      lead = su ? 'Ton compte garde tes repas, ton poids et tes programmes, même si tu changes de téléphone.' : 'Connecte-toi pour retrouver toutes tes données.';
+      body = off + '<form id="gForm" class="stack" novalidate autocomplete="on">' +
+        '<div class="field"><label for="gEmail">E-mail</label><input id="gEmail" type="email" inputmode="email" autocomplete="email" placeholder="toi@exemple.com" value="' + esc(g.email) + '"></div>' +
+        '<div class="field"><label for="gPass">Mot de passe</label><input id="gPass" type="password" autocomplete="' + (su ? 'new-password' : 'current-password') + '" placeholder="' + (su ? '8 caractères minimum' : '') + '"></div>' +
+        (su ? consentBox : '') + err +
+        '<button class="btn primary block" type="submit" id="gSubmit">' + (su ? 'Créer mon compte' : 'Se connecter') + '</button></form>' +
+        (su ? '<button class="linkbtn" data-g="login">J’ai déjà un compte</button>' : '<div class="row-btns"><button class="linkbtn" data-g="signup">Créer un compte</button><button class="linkbtn" data-g="forgot">Mot de passe oublié ?</button></div>');
+    } else if (g.mode === 'forgot') {
+      title = 'Mot de passe oublié';
+      lead = 'On t’envoie un lien par e-mail pour en choisir un nouveau.';
+      body = off + '<div class="field"><label for="gEmail">E-mail</label><input id="gEmail" type="email" inputmode="email" autocomplete="email" placeholder="toi@exemple.com" value="' + esc(g.email) + '"></div>' + err +
+        '<button class="btn primary block" data-g="sendReset">Envoyer le lien</button><button class="linkbtn" data-g="login">Retour</button>';
+    } else {
+      title = 'Bienvenue sur NutriScan';
+      lead = 'Scanne tes produits, suis tes calories et tes protéines, entraîne-toi et trouve quoi cuisiner. Crée ton compte gratuit pour commencer.';
+      body = off + googleBtn + '<button class="btn primary block" data-g="signup">' + ic('i-user', 'sm') + 'Créer un compte avec mon e-mail</button>' +
+        '<button class="btn outline block" data-g="login">J’ai déjà un compte</button>' + (google ? consentBox + err : '');
+    }
+    box.innerHTML = '<div class="ob gate"><div class="ob-top">' + (g.mode !== 'start' ? '<button class="iconbtn ghost" data-g="start" aria-label="Retour">' + ic('i-left') + '</button>' : '<span></span>') + '<span></span><span></span></div>' +
+      (g.mode === 'start' ? '<div class="logo-big">' + ic('i-scan') + '</div>' : '') +
+      '<div><h1>' + esc(title) + '</h1><p class="lead" style="margin-top:8px">' + esc(lead) + '</p></div>' +
+      '<div class="ob-body">' + body + '</div></div>';
+    box.scrollTop = 0;
+  }
+  function gateErr(t) { if (!GATE) return; GATE.err = t; const e = $('#gErr'); if (e) { e.textContent = t; e.hidden = !t; } else renderGate(); }
+  function gateRead() { if (!GATE) return; const c = $('#gConsent'), st = $('#gStats'), em = $('#gEmail'); if (c) GATE.consent = c.checked; if (st) GATE.stats = st.checked; if (em) GATE.email = em.value.trim(); }
+  async function gateSubmit() {
+    gateRead();
+    const g = GATE, su = g.mode === 'signup', email = g.email, pass = ($('#gPass') || {}).value || '';
+    if (!navigator.onLine) { gateErr('Pas de connexion Internet.'); return; }
+    if (!/^\S+@\S+\.\S+$/.test(email)) { gateErr('Adresse e-mail invalide.'); return; }
+    if (su && pass.length < 8) { gateErr('Choisis un mot de passe d’au moins 8 caractères.'); return; }
+    if (!pass) { gateErr('Tape ton mot de passe.'); return; }
+    if (su && !g.consent) { gateErr('Coche la case pour accepter la sauvegarde en ligne.'); return; }
+    const btn = $('#gSubmit'); if (btn) btn.disabled = true; gateErr('');
+    try {
+      if (su) {
+        SYNC.consentAt = new Date().toISOString(); saveSync();
+        setConsent(g.stats); track('signup', { provider: 'email' });
+        const ok = await C.signUp(email, pass, {});
+        if (!ok) { GATE.mode = 'login'; GATE.info = 'On t’a envoyé un e-mail à ' + email + ' : ouvre le lien pour activer ton compte.'; renderGate(); return; }
+      } else { await C.signIn(email, pass); track('login', { provider: 'email' }); }
+      closeGate();
+      await afterLogin();
+      checkMessages();
+    } catch (e) { gateErr(e.message); if (btn) btn.disabled = false; }
+  }
+  $('#onboard').addEventListener('submit', e => { if (e.target.id === 'gForm') { e.preventDefault(); gateSubmit(); } });
+  $('#onboard').addEventListener('change', e => { if (GATE && (e.target.id === 'gConsent' || e.target.id === 'gStats')) gateRead(); });
+  $('#onboard').addEventListener('click', e => {
+    if (!GATE) return;
+    const b = e.target.closest('[data-g]'); if (!b) return;
+    e.preventDefault(); gateRead();
+    const a = b.dataset.g;
+    if (a === 'privacy') { openPrivacy(); return; }
+    if (a === 'google') {
+      if (!navigator.onLine) { gateErr('Pas de connexion Internet.'); return; }
+      if (!GATE.consent) { gateErr('Coche la case pour accepter la sauvegarde en ligne.'); return; }
+      SYNC.consentAt = new Date().toISOString(); saveSync(); setConsent(GATE.stats);
+      track('login_start', { provider: 'google' }); flushTrack();
+      C.oauth('google', location.origin + location.pathname);
+      return;
+    }
+    if (a === 'sendReset') {
+      if (!/^\S+@\S+\.\S+$/.test(GATE.email)) { gateErr('Tape ton adresse e-mail.'); return; }
+      C.recover(GATE.email, location.origin + location.pathname).then(() => { GATE.mode = 'login'; GATE.info = 'E-mail envoyé : ouvre le lien pour choisir un nouveau mot de passe.'; renderGate(); }).catch(err => gateErr(err.message));
+      return;
+    }
+    if (['start', 'login', 'signup', 'forgot'].includes(a)) { GATE.mode = a; GATE.err = ''; GATE.info = ''; renderGate(); if (a !== 'start') setTimeout(() => { const i = $('#gEmail'); if (i && !i.value) i.focus(); }, 60); }
+  });
+  window.addEventListener('online', () => { if (GATE) renderGate(); });
+  window.addEventListener('offline', () => { if (GATE) renderGate(); });
+  // Déconnexion : on vide ce téléphone (tout est dans le compte) puis on revient à l'écran d'accès
+  function resetLocal() {
+    const theme = S.theme;
+    suppressPush = true; S = fixState({ theme }); save(); suppressPush = false;
+    SYNC.lastPush = null; SYNC.admin = false; SYNC.pending = false; SYNC.consentAt = null; saveSync();
+    TMP.clear(); setDay(today()); switchTab('journal');
   }
 
   function halalSettingsHTML() {
@@ -1875,13 +2015,31 @@
   }
   function obValid(step) {
     const d = OB.d;
-    if (step === 'body') return num(d.age) >= 10 && num(d.age) <= 110 && num(d.height) >= 100 && num(d.height) <= 250 && num(d.weight) >= 25 && num(d.weight) <= 350;
-    if (step === 'target') {
-      const gw = num(d.goalWeight), w = num(d.weight);
-      if (!(gw >= 25 && gw <= 350)) return false;
-      return d.goal === 'lose' ? gw < w : gw > w;
+    return !obProblem(step);
+  }
+  // Valeurs réalistes : âge 14-100 ans, taille 120-230 cm, poids 30-300 kg, objectif de poids sain (IMC 18,5 minimum)
+  function obProblem(step) {
+    const d = OB.d, a = num(d.age), h = num(d.height), w = num(d.weight);
+    if (step === 'body') {
+      if (!d.age || !d.height || !d.weight) return 'empty';
+      if (!(a >= 14 && a <= 100)) return 'L’âge doit être entre 14 et 100 ans.';
+      if (!(h >= 120 && h <= 230)) return 'La taille doit être entre 120 et 230 cm.';
+      if (!(w >= 30 && w <= 300)) return 'Le poids doit être entre 30 et 300 kg.';
+      const bmi = w / Math.pow(h / 100, 2);
+      if (bmi < 12 || bmi > 75) return 'Ce poids ne correspond pas à cette taille : vérifie les chiffres.';
+      return '';
     }
-    return true;
+    if (step === 'target') {
+      const gw = num(d.goalWeight);
+      if (!d.goalWeight) return 'empty';
+      if (!(gw >= 30 && gw <= 300)) return 'Le poids visé doit être entre 30 et 300 kg.';
+      if (d.goal === 'lose' && gw >= w) return 'Le poids visé doit être plus bas que ton poids actuel.';
+      if (d.goal === 'gain' && gw <= w) return 'Le poids visé doit être plus haut que ton poids actuel.';
+      if (d.goal === 'lose' && gw / Math.pow(h / 100, 2) < 18.5) return 'Ce poids serait trop bas pour ta taille (minimum conseillé : ' + Math.ceil(18.5 * Math.pow(h / 100, 2)) + ' kg).';
+      if (d.goal === 'gain' && gw > w * 1.4) return 'Vise un objectif plus proche pour commencer.';
+      return '';
+    }
+    return '';
   }
   function renderOB() {
     const steps = obSteps(), step = steps[OB.step], d = OB.d, box = $('#onboard');
@@ -1893,7 +2051,7 @@
     if (step === 'welcome') {
       body = '';
       title = 'Bienvenue sur NutriScan';
-      lead = 'Scanne tes produits, suis tes calories et tes protéines, et atteins ton objectif. On commence par calculer tes besoins : 4 questions.';
+      lead = 'On calcule tes besoins en calories et en protéines : 4 questions.';
       body += '<div class="field"><label for="ob_name">Ton prénom (facultatif)</label><input id="ob_name" type="text" data-ob-in="name" value="' + esc(d.name) + '" placeholder="ex. Sarah" autocomplete="given-name"></div>';
       btn = 'Commencer';
     } else if (step === 'goal') {
@@ -1905,11 +2063,12 @@
       title = 'Parle-nous de toi';
       lead = 'Ça sert à estimer combien de calories ton corps dépense.';
       body = '<div class="seg">' + ['m', 'f'].map(s => '<button data-ob-set="sex" data-val="' + s + '"' + (d.sex === s ? ' class="on"' : '') + '>' + (s === 'm' ? 'Homme' : 'Femme') + '</button>').join('') + '</div>' +
-        '<div class="grid3">' + inputF('age', 'Âge', 'ans', '20', 'numeric') + inputF('height', 'Taille', 'cm', '175', 'numeric') + inputF('weight', 'Poids', 'kg', '70') + '</div>';
+        '<div class="grid3">' + inputF('age', 'Âge', 'ans', '20', 'numeric') + inputF('height', 'Taille', 'cm', '175', 'numeric') + inputF('weight', 'Poids', 'kg', '70') + '</div>' +
+        '<p class="hint err" id="obErr" hidden></p>';
     } else if (step === 'target') {
       title = d.goal === 'lose' ? 'Quel poids vises-tu ?' : 'Jusqu’à quel poids ?';
       body = inputF('goalWeight', 'Poids visé', 'kg', d.goal === 'lose' ? String(Math.max(40, r0(num(d.weight) - 5))) : String(r0(num(d.weight) + 5))) +
-        '<p class="hint err" id="obTargetErr" hidden>' + (d.goal === 'lose' ? 'Le poids visé doit être plus bas que ton poids actuel.' : 'Le poids visé doit être plus haut que ton poids actuel.') + '</p>' +
+        '<p class="hint err" id="obErr" hidden></p>' +
         '<span class="flabel">À quel rythme ?</span>' +
         opt('rate', 0.25, null, '', d.goal === 'lose' ? '0,25 kg par semaine' : '0,25 kg par semaine', 'Doux, facile à tenir') +
         opt('rate', 0.5, null, '', '0,5 kg par semaine', d.goal === 'lose' ? 'Recommandé' : 'Plus rapide, un peu plus de gras');
@@ -1937,7 +2096,7 @@
       '<div><h1>' + esc(title) + '</h1>' + (lead ? '<p class="lead" style="margin-top:8px">' + esc(lead) + '</p>' : '') + '</div>' +
       '<div class="ob-body">' + body + '</div>' +
       '<div class="ob-foot"><button class="btn primary block" data-ob="next" id="obNext">' + btn + '</button>' +
-      (step === 'welcome' && !OB.edit ? '<button class="btn outline block" data-ob="skip">Plus tard</button>' : '') + '</div></div>';
+      '</div></div>';
     box.scrollTop = 0;
     obUpdateBtn();
   }
@@ -1945,8 +2104,8 @@
     const steps = obSteps(), step = steps[OB.step];
     const ok = obValid(step);
     const b = $('#obNext'); if (b) b.disabled = !ok;
-    const err = $('#obTargetErr');
-    if (err) { const gw = num(OB.d.goalWeight); err.hidden = !(gw >= 25) || ok; }
+    const err = $('#obErr');
+    if (err) { const pb = obProblem(step); err.textContent = pb === 'empty' ? '' : pb; err.hidden = !pb || pb === 'empty'; }
   }
   function finishOB() {
     const d = OB.d, r = computePlan(d);
@@ -1987,7 +2146,7 @@
 
   /* ================= Onglets + thème ================= */
   function switchTab(t) {
-    if (!['journal', 'progress', 'profile'].includes(t)) return;
+    if (!['journal', 'progress', 'meals', 'sport', 'profile'].includes(t)) return;
     tab = t;
     $$('.screen').forEach(s => { s.hidden = s.id !== 'screen-' + t; });
     $$('.tab[data-tab]').forEach(b => { const on = b.dataset.tab === t; b.classList.toggle('on', on); if (on) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current'); });
@@ -1998,7 +2157,16 @@
     renderJournal();
     if (tab === 'progress') renderProgress();
     if (tab === 'profile') renderProfile();
+    if ((tab === 'meals' || tab === 'sport') && SCREENS[tab]) { try { SCREENS[tab].render($('#screen-' + tab)); } catch (e) { console.error(e); } }
   }
+  /* Sections Repas et Sport : modules séparés (meals.js, sport.js) qui utilisent ces outils */
+  const SCREENS = {};
+  window.NS_APP = {
+    get S() { return S; }, save, touchMeta, now, uid, today, addDays, parseYmd, ymd, esc, num, fk, f1, r0, clamp, ic, $, $$,
+    mountSheet, openLayer, closeTop, head, actionSheet, toast, arm, track, renderAll, switchTab, openProduct, getP, totals, burnedOf, latestWeight,
+    MEALS, MEAL, defaultMeal, get day() { return day; }, get tab() { return tab; }, screens: SCREENS,
+    register(name, mod) { SCREENS[name] = mod; if (tab === name) renderAll(); }
+  };
   function applyTheme() {
     if (S.theme === 'light' || S.theme === 'dark') document.documentElement.setAttribute('data-theme', S.theme);
     else document.documentElement.removeAttribute('data-theme');
@@ -2037,6 +2205,8 @@
     myFoods: () => openFoodList('mine'),
     favList: () => openFoodList('fav'),
     exportData: () => exportData(),
+    install: () => doInstall(),
+    installHide: () => { try { localStorage.setItem('nutriscan.installHide', '1'); } catch (e) { /* rien */ } renderJournal(); toast('Tu pourras installer l’appli depuis Profil'); },
     importData: () => $('#importFile').click(),
     auth: b => openAuth(b.dataset.m),
     privacy: () => openPrivacy(),
@@ -2045,9 +2215,15 @@
     syncNow: () => { sync({ push: true }).then(ok => toast(ok ? 'Sauvegardé en ligne' : (navigator.onLine ? (syncError || 'Sauvegarde impossible pour l’instant') : 'Hors ligne : ce sera envoyé au retour d’Internet'))); },
     syncPull: async () => { try { const r = await C.pull(); if (r) offerRemote(r); else toast('Aucune sauvegarde en ligne pour l’instant'); } catch (e) { toast(e.message); } },
     newPassword: () => openNewPassword(),
-    logout: async () => { await C.signOut(); SYNC.admin = false; SYNC.pending = false; saveSync(); renderAll(); toast('Déconnecté : tes données restent sur ce téléphone'); },
+    logout: async () => {
+      if (SYNC.pending || !SYNC.lastPush) {
+        const ok = await sync({ push: true });
+        if (!ok) { toast('Connecte-toi à Internet pour sauvegarder tes données avant de te déconnecter'); return; }
+      }
+      await C.signOut(); resetLocal(); openGate('start'); toast('Déconnecté');
+    },
     deleteAccount: async () => {
-      try { await C.deleteAccount(); SYNC.lastPush = null; SYNC.admin = false; SYNC.pending = false; SYNC.consentAt = null; saveSync(); renderAll(); toast('Compte et sauvegarde en ligne supprimés'); }
+      try { await C.deleteAccount(); resetLocal(); openGate('start'); toast('Compte et sauvegarde en ligne supprimés'); }
       catch (e) { toast(e.message); }
     },
     wipe: () => {
@@ -2135,8 +2311,15 @@
   try { if (history.state && history.state.nsLayer) history.replaceState(null, ''); } catch (e) { /* rien */ }
   applyTheme();
   renderAll();
-  if (!S.profile && !S.skipSetup && !/access_token=/.test(location.hash)) openOnboarding(false);
+  const linkBack = /access_token=|error_description=/.test(location.hash);
+  if (needAuth() && !linkBack) openGate('start');
+  else if (!S.profile && !linkBack) openOnboarding(false);
   else setTimeout(askConsent, 1500);
+  // Raccourcis de l'icône (appui long) : ?go=scan | meals | sport
+  try {
+    const go = new URLSearchParams(location.search).get('go');
+    if (go) { history.replaceState(history.state, '', location.pathname + location.hash); if (!GATE && !OB) { if (go === 'scan') setTimeout(() => openScanner(), 300); else switchTab(go); } }
+  } catch (e) { /* rien */ }
   track('app_open', openInfo());
   cloudStart();
   if ('serviceWorker' in navigator && window.isSecureContext) navigator.serviceWorker.register('sw.js').catch(() => {});

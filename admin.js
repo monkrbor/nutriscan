@@ -177,7 +177,13 @@
   /* ---------- Utilisateurs ---------- */
   let utab = 'progress', ucache = null, jday = null, pendingAll = null;
   const MEALS = [['breakfast', 'Petit-déjeuner'], ['lunch', 'Déjeuner'], ['dinner', 'Dîner'], ['snack', 'Collations']];
-  const UTABS = [['progress', 'Progression'], ['journal', 'Journal'], ['data', 'Profil et aliments'], ['backups', 'Sauvegardes'], ['account', 'Compte'], ['activity', 'Activité']];
+  const UTABS = [['progress', 'Progression'], ['journal', 'Journal'], ['sport', 'Sport'], ['meals', 'Repas'], ['data', 'Profil et aliments'], ['backups', 'Sauvegardes'], ['account', 'Compte'], ['activity', 'Activité']];
+  const EXN = Object.fromEntries((window.NS_EX || []).map(e => [e.id, e.n]));
+  const RCP = Object.fromEntries(((window.NS_RECIPES || {}).R || []).map(r => [r.id, r]));
+  const SPG = { fat: 'Perdre du gras', muscle: 'Prendre du muscle', strength: 'Gagner en force', fit: 'Être en forme' };
+  const SPP = { gym: 'Salle de sport', home: 'Maison avec matériel', body: 'Poids du corps' };
+  const WDN = ['', 'lun', 'mar', 'mer', 'jeu', 'ven', 'sam', 'dim'];
+  const SLN = { breakfast: 'Petit-déj', lunch: 'Déjeuner', dinner: 'Dîner', snack: 'Collation' };
   const n1 = v => (Math.round((+v || 0) * 10) / 10).toLocaleString('fr-FR');
   const kg = v => v == null || v === '' || !isFinite(v) ? '—' : n1(v) + ' kg';
   const sgn = v => (v > 0 ? '+' : v < 0 ? '−' : '') + n1(Math.abs(v));
@@ -379,6 +385,35 @@
         '<section class="panel"><h2>Tous les jours notés</h2>' + (all.length ? '<div class="tbl"><table class="click"><thead><tr><th>Jour</th><th class="num">kcal</th><th class="num">Prot.</th><th class="num">Gluc.</th><th class="num">Lip.</th><th class="num">Eau</th></tr></thead><tbody>' +
           all.map(x => { const t = st.byDay[x], wa = +(d.water || {})[x] || 0; return '<tr data-jd="' + x + '"' + (x === jday ? ' class="on"' : '') + '><td class="nw">' + esc(dayFR(x, { weekday: 'short' }) + ' ' + ddmm(x) + (x.slice(0, 4) !== day(Date.now()).slice(0, 4) ? '/' + x.slice(2, 4) : '')) + '</td><td class="num">' + fk(t.kcal) + '</td><td class="num">' + fk(t.p) + ' g</td><td class="num">' + fk(t.c) + ' g</td><td class="num">' + fk(t.f) + ' g</td><td class="num">' + (wa ? n1(wa / 1000) + ' L' : '—') + '</td></tr>'; }).join('') +
           '</tbody></table></div>' + (st.days.length > 120 ? '<p class="hint">Les 120 derniers jours sont affichés ; l’export contient tout.</p>' : '') : '<p class="hint">Aucun jour noté.</p>') + '</section>';
+    }
+    if (utab === 'sport') {
+      const sp = d.sport || {}, pr = sp.prefs, plan = sp.plan, ws = (d.workouts || []).slice().sort((a, b) => (b.date + (b.end || '')).localeCompare(a.date + (a.end || '')));
+      const m30 = ws.filter(w => w.date > addDays(day(Date.now()), -30));
+      return '<div class="two"><section class="panel"><h2>Programme</h2>' + (pr && plan ?
+          '<div class="kv"><span>Objectif</span><b>' + esc(SPG[pr.goal] || pr.goal) + '</b></div><div class="kv"><span>Lieu</span><b>' + esc(SPP[pr.place] || pr.place) + '</b></div>' +
+          '<div class="kv"><span>Jours</span><b>' + esc((pr.days || []).map(x => WDN[x]).join(', ')) + ' · ' + pr.dur + ' min</b></div><div class="kv"><span>Niveau</span><b>' + ['', 'Débutant', 'Intermédiaire', 'Avancé'][pr.level || 1] + '</b></div>' +
+          ((pr.pain || []).length ? '<div class="kv"><span>Douleurs</span><b>' + esc(pr.pain.map(x => ({ k: 'genoux', b: 'dos', s: 'épaules', w: 'poignets' })[x]).join(', ')) + '</b></div>' : '') +
+          plan.sessions.map(s => '<div class="sec"><h3>' + esc(s.key + ' · ' + s.name) + '</h3><p class="hint">' + esc(s.items.map(it => (EXN[it.ex] || it.ex) + ' ' + (it.sets > 1 ? it.sets + '×' : '') + it.reps).join(' · ')) + '</p></div>').join('')
+          : '<p class="hint">Pas encore de programme.</p>') + '</section>' +
+        '<section class="panel"><h2>Séances <span class="chip2">' + ws.length + '</span></h2>' +
+          '<div class="mini"><div><b>' + m30.length + '</b><span>séances (30 j)</span></div><div><b>' + fk(m30.reduce((a, w) => a + (w.vol || 0), 0)) + '</b><span>kg soulevés (30 j)</span></div><div><b>' + fk(m30.reduce((a, w) => a + (w.kcal || 0), 0)) + '</b><span>kcal (30 j)</span></div></div>' +
+          (ws.length ? '<div class="tbl"><table><thead><tr><th>Jour</th><th>Séance</th><th class="num">Durée</th><th class="num">Séries</th><th class="num">Volume</th></tr></thead><tbody>' +
+            ws.slice(0, 40).map(w => '<tr><td class="nw">' + esc(dayFR(w.date, { day: 'numeric', month: 'short' })) + '</td><td class="wrap">' + esc(w.name) + '</td><td class="num">' + Math.round((w.dur || 0) / 60) + ' min</td><td class="num">' + (w.items || []).reduce((a, i) => a + (i.sets || []).filter(x => x.done).length, 0) + '</td><td class="num">' + fk(w.vol) + ' kg</td></tr>').join('') +
+            '</tbody></table></div>' : '<p class="hint">Aucune séance faite.</p>') + '</section></div>';
+    }
+    if (utab === 'meals') {
+      const c = d.cook || {}, pr = c.prefs, wk = c.week;
+      const DIETN = { omni: 'Mange de tout (sans porc)', pesco: 'Poisson, pas de viande', vege: 'Végétarien', vegan: 'Végan' };
+      return '<div class="two"><section class="panel"><h2>Goûts</h2>' + (pr ?
+          '<div class="kv"><span>Alimentation</span><b>' + esc(DIETN[pr.diet] || pr.diet) + '</b></div>' +
+          ((pr.avoid || []).length ? '<div class="kv"><span>Évite</span><b>' + esc(pr.avoid.join(', ')) + '</b></div>' : '') +
+          '<div class="kv"><span>Cuisines préférées</span><b>' + esc((pr.cuis || []).join(', ') || 'toutes') + '</b></div>' +
+          '<div class="kv"><span>Temps max</span><b>' + (pr.time ? pr.time + ' min' : 'peu importe') + '</b></div><div class="kv"><span>Personnes</span><b>' + (pr.people || 1) + '</b></div>' +
+          '<div class="kv"><span>Recettes favorites</span><b>' + esc((c.favs || []).map(id => (RCP[id] || {}).n || id).join(', ') || '—') + '</b></div>'
+          : '<p class="hint">Questionnaire pas encore rempli.</p>') + '</section>' +
+        '<section class="panel"><h2>Menu de la semaine</h2>' + (wk ? Object.keys(wk.days).sort().map(dd => '<div class="sec"><h3>' + esc(dayFR(dd, { weekday: 'long', day: 'numeric', month: 'short' })) + '</h3>' +
+          Object.keys(wk.days[dd]).map(sl => '<div class="kv"><span>' + esc(SLN[sl] || sl) + '</span><b>' + esc((RCP[wk.days[dd][sl].id] || {}).n || wk.days[dd][sl].id) + '</b></div>').join('') + '</div>').join('')
+          : '<p class="hint">Pas de menu créé.</p>') + '</section></div>';
     }
     if (utab === 'data') {
       const prods = Object.values(d.products || {}), mine = prods.filter(p => p && (p.source === 'custom' || p.manual));

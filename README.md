@@ -5,6 +5,10 @@ Appli en ligne : **https://monkrbor.github.io/nutriscan/**
 
 ## Fonctionnalités
 
+- **Compte obligatoire** dès l'ouverture : e-mail + mot de passe ou Google, avec accord pour la sauvegarde et (au choix) pour les statistiques
+- **Sport** : questionnaire (objectif, salle / maison / poids du corps, matériel, jours, durée, niveau, douleurs), programme sur mesure, séance guidée (séries, charges, minuteur de repos), progression automatique des charges, historique ; 97 exercices animés avec une silhouette neutre (aucune photo de personne)
+- **Repas** : questionnaire de goûts, idées qui rentrent dans les calories restantes, 75 recettes pas à pas (portions ajustables, ajout au journal), menu de la semaine et liste de courses ; jamais de porc, d'alcool ni de sang
+- **Installer l'appli** : bouton d'installation (Android) et guide en 3 étapes (iPhone), raccourcis Scanner / Repas / Sport sur l'icône
 - **Calcul de tes besoins** au premier lancement : objectif (perdre, garder, prendre), âge, taille, poids, activité → calories, protéines, glucides, lipides et eau par jour
 - **Journal du jour** : anneau des calories restantes (mangé / restant / brûlé), barres de macros, 4 repas avec objectif par repas, navigation par semaine, série de jours suivis
 - **Scanner plein écran** : lecteur natif du téléphone (Android) ou moteur ZXing en WebAssembly (iPhone), lecture de la zone du cadre en haute définition, vérification de la clé de contrôle du code-barres, lampe, zoom ×2, saisie manuelle du code en secours
@@ -60,6 +64,8 @@ Sans compte, les données restent sur le téléphone. Avec un compte, elles sont
 | `foods.js` | Aliments courants (valeurs moyennes pour 100 g) |
 | `additives.js` | Base des additifs E (rôle, origine, santé) |
 | `ingredients.js` | Avertissements, végan / végétarien, allergènes, surlignage des ingrédients |
+| `exercises.js`, `figure.js`, `sport.js` | Exercices, animations de la silhouette, section Sport |
+| `recipes.js`, `meals.js` | Recettes (valeurs calculées par ingrédient), section Repas |
 | `config.js` | Adresse et clé publique Supabase |
 | `cloud.js` | Comptes et sauvegarde en ligne |
 | `admin.html`, `admin.js` | Panneau d'administration (utilisateurs, statistiques, erreurs, messages) |
