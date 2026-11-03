@@ -244,6 +244,39 @@ end $$;
 drop trigger if exists events_cleanup on public.events;
 create trigger events_cleanup after insert on public.events for each statement execute function public.events_cleanup();
 
+-- 13. Rappels (notifications push)
+-- Un abonnement par appareil ; les réglages des rappels sont dans la sauvegarde (data->remind).
+create table if not exists public.push_subs (
+  endpoint text primary key,
+  user_id uuid not null default auth.uid() references auth.users(id) on delete cascade,
+  p256dh text not null,
+  auth text not null,
+  tz text not null default 'Europe/Paris',
+  lang text not null default 'fr',
+  sent jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create index if not exists push_subs_user on public.push_subs(user_id);
+alter table public.push_subs enable row level security;
+drop policy if exists "push_subs_own" on public.push_subs;
+create policy "push_subs_own" on public.push_subs for all using (user_id = auth.uid()) with check (user_id = auth.uid());
+-- Clés VAPID du serveur : créées par la fonction elle-même, aucun accès depuis l'appli (pas de policy)
+create table if not exists public.push_keys (
+  id int primary key default 1,
+  pub text not null,
+  jwk jsonb not null,
+  last_run timestamptz,
+  created_at timestamptz not null default now()
+);
+alter table public.push_keys enable row level security;
+-- Tournée toutes les 15 minutes (fonction Edge « rappels », sans vérification JWT : elle n'envoie que ce qui est dû)
+create extension if not exists pg_cron;
+create extension if not exists pg_net;
+select cron.unschedule('nutriscan-rappels') where exists (select 1 from cron.job where jobname = 'nutriscan-rappels');
+select cron.schedule('nutriscan-rappels', '*/15 * * * *',
+  $$ select net.http_post(url := 'https://otmjkedumgsipykdjhcu.supabase.co/functions/v1/rappels', headers := '{"Content-Type":"application/json"}'::jsonb, body := '{"run":true}'::jsonb) $$);
+
 -- 12. APRÈS avoir créé ton compte dans l'appli, lance cette ligne pour devenir admin
 --    (remplace l'adresse par celle de ton compte) :
 -- insert into public.admins (user_id) select id from auth.users where email = 'ton.email@exemple.com';
