@@ -1,0 +1,50 @@
+// NutriScan pour Android : ouvre l'appli web en plein écran dans Chrome (Trusted Web Activity).
+plugins {
+    id 'com.android.application'
+}
+
+def ks = System.getenv('KS_FILE')
+
+android {
+    namespace 'io.github.monkrbor.nutriscan'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'io.github.monkrbor.nutriscan'
+        minSdk 21
+        targetSdk 34
+        versionCode((System.getenv('VERSION_CODE') ?: '1') as int)
+        versionName(System.getenv('VERSION_NAME') ?: '1.0')
+    }
+
+    signingConfigs {
+        release {
+            if (ks) {
+                storeFile file(ks)
+                storePassword System.getenv('KS_PASS')
+                keyAlias 'nutriscan'
+                keyPassword System.getenv('KS_PASS')
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig ks ? signingConfigs.release : signingConfigs.debug
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+
+    lint {
+        checkReleaseBuilds false
+    }
+}
+
+dependencies {
+    implementation 'com.google.androidbrowserhelper:androidbrowserhelper:2.5.0'
+}

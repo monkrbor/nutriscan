@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="appName">NutriScan</string>
+    <string name="launchUrl">https://monkrbor.github.io/nutriscan/</string>
+    <string name="assetStatements" translatable="false">[{\"relation\": [\"delegate_permission/common.handle_all_urls\"], \"target\": {\"namespace\": \"web\", \"site\": \"https://monkrbor.github.io\"}}]</string>
+</resources>
