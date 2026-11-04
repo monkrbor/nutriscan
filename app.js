@@ -237,7 +237,7 @@
   const doPush = () => sync({ push: true });
 
   /* ---------- Statistiques et rapports d'erreurs (seulement avec l'accord de l'utilisateur) ---------- */
-  const VERSION = '3.3';
+  const VERSION = '3.3.1';
   const TQ_KEY = 'nutriscan.tq';
   let TQ = store.get(TQ_KEY, []);
   let consent = store.get('nutriscan.consent', null); // true, false, ou null = pas encore demandé
@@ -271,6 +271,8 @@
   }
   window.addEventListener('error', ev => {
     if (!ev || !ev.message || ev.message === 'Script error.') return;
+    // Scripts ajoutés à la page par le navigateur ou une extension (ex. portefeuille crypto de Brave) : pas des bugs de l'appli
+    if (/ethereum|solana|phantom|__gCrWeb|webkit\.messageHandlers/i.test(ev.message)) return;
     track('error', { msg: String(ev.message).slice(0, 300), src: String(ev.filename || '').split('/').pop(), line: ev.lineno, col: ev.colno, stack: ev.error && ev.error.stack ? String(ev.error.stack).slice(0, 800) : '' });
   });
   window.addEventListener('unhandledrejection', ev => {
@@ -1583,7 +1585,8 @@
       [ic('i-check'), 'Touche « Ajouter »', 'NutriScan apparaît sur ton écran d’accueil comme une appli.']]
       : [[ic('i-dots'), 'Ouvre le menu du navigateur', 'Les trois points en haut à droite.'], [ic('i-download'), 'Choisis « Installer l’appli »', 'Ou « Ajouter à l’écran d’accueil ».'], [ic('i-check'), 'Confirme', 'NutriScan apparaît avec tes autres applis.']];
     const iosExpress = ios ? '<a class="btn primary block" href="installer.html" target="_blank" rel="noopener" style="margin-bottom:10px">Installation express (profil)</a><p class="hint" style="margin-top:0">Un clic installe l’icône via Réglages, sans passer par Partager. Sinon, suis les étapes ci-dessous.</p>' : '';
-    const el = mountSheet(head('Installer NutriScan') + iosExpress + '<ol class="inst">' + steps.map((x, i) => '<li><span class="inst-n">' + (i + 1) + '</span><span class="micon sm" style="--mc:var(--brand)">' + x[0] + '</span><div class="min0"><b>' + esc(x[1]) + '</b><small>' + esc(x[2]) + '</small></div></li>').join('') + '</ol>' +
+    const apk = /Android/.test(navigator.userAgent) ? '<a class="btn primary block" href="installer.html" target="_blank" rel="noopener" style="margin-bottom:10px">Télécharger l’appli Android (APK)</a><p class="hint" style="margin-top:0">Le guide pas à pas s’ouvre. Sinon, installe-la directement avec les étapes ci-dessous.</p>' : '';
+    const el = mountSheet(head('Installer NutriScan') + iosExpress + apk + '<ol class="inst">' + steps.map((x, i) => '<li><span class="inst-n">' + (i + 1) + '</span><span class="micon sm" style="--mc:var(--brand)">' + x[0] + '</span><div class="min0"><b>' + esc(x[1]) + '</b><small>' + esc(x[2]) + '</small></div></li>').join('') + '</ol>' +
       '<p class="hint">C’est gratuit, rien à télécharger depuis un store, et tes données restent dans ton compte.</p><button class="btn primary block" data-act="close">Compris</button>');
     openLayer({ el });
     track('install_help', { ios });

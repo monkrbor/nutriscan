@@ -19,9 +19,11 @@
   .logo small{color:var(--muted)}
   .card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:22px 20px;margin-bottom:16px}
   h2{font-size:1.15rem;margin:0 0 4px}
+  h3{font-size:1rem;margin:22px 0 0;padding-top:16px;border-top:1px solid var(--line)}
+  .center{text-align:center}
   p{margin:8px 0}
   .muted{color:var(--muted);font-size:.92rem}
-  .btn{display:flex;align-items:center;justify-content:center;gap:10px;width:100%;padding:15px 18px;border-radius:14px;border:none;background:var(--accent);color:#fff;font-size:1.05rem;font-weight:700;text-decoration:none;cursor:pointer;margin:14px 0 6px;transition:background .15s}
+  .btn{display:flex;align-items:center;justify-content:center;gap:10px;width:100%;padding:15px 18px;border-radius:14px;border:none;background:var(--accent);color:#fff;font-size:1.05rem;font-weight:700;text-decoration:none;cursor:pointer;margin:14px 0 6px;text-align:center;transition:background .15s}
   .btn:active{background:var(--accent2)}
   .btn.ghost{background:transparent;color:var(--accent);border:1.5px solid var(--line)}
   .steps{counter-reset:s;list-style:none;padding:0;margin:12px 0 0}
@@ -59,28 +61,45 @@
       Installer sur iPhone
     </a>
     <ol class="steps">
-      <li>Appuie sur le bouton ci-dessus. Safari dit « Ce site essaie de télécharger un profil de configuration » → <b>Autoriser</b>.</li>
-      <li>Un message <b>« Profil téléchargé »</b> apparaît. Ouvre <b>Réglages</b> (l'appli grise avec la roue).</li>
-      <li>Tout en haut, touche <b>« Profil téléchargé »</b>, puis <b>Installer</b> en haut à droite (entre ton code si demandé).</li>
-      <li>iOS affiche <b>« Non signé »</b> en jaune : c'est normal pour une appli gratuite. Touche <b>Installer</b> à nouveau pour confirmer.</li>
+      <li>Appuie sur le bouton ci-dessus. Safari dit «&nbsp;Ce site essaie de télécharger un profil de configuration&nbsp;» → <b>Autoriser</b>.</li>
+      <li>Un message <b>«&nbsp;Profil téléchargé&nbsp;»</b> apparaît. Ouvre <b>Réglages</b> (l'appli grise avec la roue).</li>
+      <li>Tout en haut, touche <b>«&nbsp;Profil téléchargé&nbsp;»</b>, puis <b>Installer</b> en haut à droite (entre ton code si demandé).</li>
+      <li>iOS affiche <b>«&nbsp;Non signé&nbsp;»</b> en jaune : c'est normal pour une appli gratuite. Touche <b>Installer</b> à nouveau pour confirmer.</li>
       <li>C'est fait ! L'icône <b>NutriScan</b> est sur ton écran d'accueil. 🎉</li>
     </ol>
-    <div class="note">⚠️ L'avertissement « Profil non signé » est normal : signer un profil coûte un abonnement Apple payant. Le profil ajoute seulement une icône qui ouvre NutriScan — rien d'autre. Tu peux le retirer à tout moment dans Réglages → Général → VPN et gestion de l'appareil.</div>
+    <div class="note">⚠️ L'avertissement «&nbsp;Profil non signé&nbsp;» est normal : signer un profil coûte un abonnement Apple payant. Le profil ajoute seulement une icône qui ouvre NutriScan — rien d'autre. Tu peux le retirer à tout moment dans Réglages → Général → VPN et gestion de l'appareil.</div>
     <a class="btn ghost" href="./">Juste ouvrir l'appli dans le navigateur</a>
   </section>
 
   <!-- Android -->
   <section class="card hide" id="android">
     <h2>Installer sur Android</h2>
-    <p class="muted">Ajoute NutriScan à ton écran d'accueil en un geste.</p>
-    <button class="btn" id="androidBtn">
+    <p class="muted">Deux façons, au choix : télécharger l'application (fichier APK) ou l'installer directement depuis Chrome.</p>
+
+    <h3>1. Télécharger l'application (APK)</h3>
+    <a class="btn" href="https://github.com/monkrbor/nutriscan/releases/download/android/NutriScan.apk" id="apkBtn">
       <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>
-      Installer l'application
+      Télécharger NutriScan.apk
+    </a>
+    <p class="muted center">Gratuit · moins de 1 Mo · Android 5 ou plus récent</p>
+    <ol class="steps">
+      <li>Appuie sur <b>Télécharger NutriScan.apk</b>. Si Chrome affiche «&nbsp;Ce type de fichier peut être dangereux&nbsp;», touche <b>Télécharger quand même</b>.</li>
+      <li>À la fin du téléchargement, touche <b>Ouvrir</b> (ou ouvre l'appli <b>Fichiers</b> → <b>Téléchargements</b> → <b>NutriScan.apk</b>).</li>
+      <li>Android affiche «&nbsp;Pour votre sécurité, votre téléphone n'est pas autorisé à installer des applis inconnues&nbsp;». Touche <b>Paramètres</b>, active <b>Autoriser cette source</b>, puis reviens en arrière.</li>
+      <li>Touche <b>Installer</b>. Si <b>Play Protect</b> affiche un message, touche <b>Plus de détails</b> → <b>Installer quand même</b> (ou <b>Installer sans analyser</b>).</li>
+      <li>Touche <b>Ouvrir</b> : NutriScan est maintenant dans tes applications. Connecte-toi avec ton compte. 🎉</li>
+    </ol>
+    <div class="note">⚠️ Ces avertissements sont normaux pour une appli qui ne vient pas du Play Store. L'application ouvre NutriScan avec Chrome : ton compte et tes données restent les mêmes. Tu peux la désinstaller à tout moment comme n'importe quelle appli.</div>
+
+    <h3>2. Ou sans fichier, avec Chrome</h3>
+    <button class="btn ghost" id="androidBtn">
+      <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>
+      Installer depuis Chrome
     </button>
     <ol class="steps" id="androidSteps">
-      <li>Appuie sur le bouton ci-dessus, puis sur <b>Installer</b>.</li>
+      <li>Ouvre cette page dans <b>Chrome</b>, appuie sur le bouton ci-dessus, puis sur <b>Installer</b>.</li>
       <li>Si le bouton ne fait rien : touche le menu <b>⋮</b> de Chrome, en haut à droite.</li>
-      <li>Choisis <b>« Installer l'application »</b> ou <b>« Ajouter à l'écran d'accueil »</b>.</li>
+      <li>Choisis <b>«&nbsp;Installer l'application&nbsp;»</b> ou <b>«&nbsp;Ajouter à l'écran d'accueil&nbsp;»</b>.</li>
     </ol>
     <a class="btn ghost" href="./">Juste ouvrir l'appli dans le navigateur</a>
   </section>
