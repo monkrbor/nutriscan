@@ -14,6 +14,10 @@
   const r0 = v => Math.round(v || 0);
   const f1 = v => { v = v || 0; return (Math.abs(v) < 10 ? String(Math.round(v * 10) / 10) : String(Math.round(v))).replace('.', ','); };
   const fk = v => r0(v).toLocaleString('fr-FR');
+  // Langue de l'appli (i18n.js) : les dates sont écrites directement dans la langue choisie
+  const I18N = window.NS_I18N || { lang: 'fr', loc: 'fr-FR', langs: [['fr', 'Français', 'fr-FR']], t: x => x, searchText: x => x };
+  const LOC = I18N.loc;
+  const LANG_SEG = () => '<div class="seg lang-seg" data-notr>' + I18N.langs.map(l => '<button data-act="lang" data-l="' + l[0] + '" lang="' + l[0] + '"' + (I18N.lang === l[0] ? ' class="on"' : '') + '>' + l[1] + '</button>').join('') + '</div>';
   const fkg = v => String(Math.round((v || 0) * 10) / 10).replace('.', ',');
   const fL = ml => String(Math.round((ml || 0) / 10) / 100).replace('.', ',');
   const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
@@ -85,6 +89,10 @@
       weights: Array.isArray(s.weights) ? s.weights.filter(w => w && w.date && w.kg > 0) : [],
       theme: ['auto', 'light', 'dark', 'black'].includes(s.theme) ? s.theme : 'auto',
       accent: ACCENTS.some(a => a[0] === s.accent) ? s.accent : 'vert',
+      // Motivation : badges obtenus, défis de la semaine réussis, dernier bilan vu
+      motiv: fixMotiv(s.motiv),
+      // Rappels (notifications) : réglages communs à tous les appareils du compte
+      remind: fixRemind(s.remind),
       // Sport (préférences, programme, séances) et Repas (goûts, menu de la semaine, courses)
       sport: s.sport && typeof s.sport === 'object' ? s.sport : {},
       workouts: Array.isArray(s.workouts) ? s.workouts.filter(w => w && w.id && w.date) : [],
@@ -117,6 +125,23 @@
     o.weights.sort((a, b) => a.date < b.date ? -1 : 1);
     return o;
   }
+  function fixMotiv(m) {
+    m = m && typeof m === 'object' ? m : {};
+    const obj = v => v && typeof v === 'object' && !Array.isArray(v) ? v : {};
+    return { badges: obj(m.badges), done: obj(m.done), seen: typeof m.seen === 'string' ? m.seen : '', lvl: num(m.lvl), init: m.init ? 1 : 0, t: num(m.t) };
+  }
+  function fixRemind(r) {
+    r = r && typeof r === 'object' ? r : {};
+    const t = v => /^\d{2}:\d{2}$/.test(String(v || '')) ? v : '';
+    const def = (k, d) => r[k] === undefined ? d : t(r[k]);
+    const bool = (k, d) => r[k] === undefined ? d : !!r[k];
+    return {
+      on: !!r.on, bk: def('bk', '08:00'), lu: def('lu', '12:30'), di: def('di', '19:30'), sn: def('sn', ''),
+      water: bool('water', true), weigh: Number.isInteger(r.weigh) && r.weigh >= -1 && r.weigh <= 6 ? r.weigh : 1, wT: t(r.wT) || '08:00',
+      sport: Array.isArray(r.sport) ? [...new Set(r.sport.map(Number).filter(d => Number.isInteger(d) && d >= 0 && d <= 6))] : [], sT: t(r.sT) || '18:00',
+      report: bool('report', true), streak: bool('streak', true), t: num(r.t)
+    };
+  }
   function loadState() {
     let s = store.get(KEY, null);
     if (!s) { // reprise des données de la version 1
@@ -143,6 +168,7 @@
       if (!store.set(KEY, S) && !saveWarned) { saveWarned = true; toast("Mémoire du navigateur pleine : sauvegarde tes données puis efface d'anciens jours"); }
     }
     schedulePush();
+    if (window.NS_MOTIV) window.NS_MOTIV.soon();
   }
   const now = () => Date.now();
   const touchMeta = () => { S.metaT = now(); };
@@ -211,7 +237,7 @@
   const doPush = () => sync({ push: true });
 
   /* ---------- Statistiques et rapports d'erreurs (seulement avec l'accord de l'utilisateur) ---------- */
-  const VERSION = '3.2';
+  const VERSION = '3.3';
   const TQ_KEY = 'nutriscan.tq';
   let TQ = store.get(TQ_KEY, []);
   let consent = store.get('nutriscan.consent', null); // true, false, ou null = pas encore demandé
@@ -436,7 +462,7 @@
     const t = today();
     if (d === t) return "Aujourd'hui";
     if (d === addDays(t, -1)) return 'Hier';
-    return cap(parseYmd(d).toLocaleDateString('fr-FR', long === false ? { weekday: 'short', day: 'numeric', month: 'short' } : { weekday: 'long', day: 'numeric', month: 'long' }));
+    return cap(parseYmd(d).toLocaleDateString(LOC, long === false ? { weekday: 'short', day: 'numeric', month: 'short' } : { weekday: 'long', day: 'numeric', month: 'long' }));
   }
 
   /* ================= Journal ================= */
@@ -448,10 +474,12 @@
     $('#streakN').textContent = streakCount();
     renderWeek(); renderHero(); renderMeals(); renderWater(); renderActivity();
     const ib = $('#installBanner');
+    const mc = $('#motivCard');
+    if (mc) mc.innerHTML = window.NS_MOTIV ? window.NS_MOTIV.journalCardHTML() : '';
     if (ib) { let hide = false; try { hide = !!localStorage.getItem('nutriscan.installHide'); } catch (e) { /* rien */ } ib.innerHTML = hide || !S.profile ? '' : installCardHTML(true); }
   }
   function renderWeek() {
-    const t = today(), L = loggedDays(), letters = ['L', 'M', 'M', 'J', 'V', 'S', 'D'];
+    const t = today(), L = loggedDays(), letters = Array.from({ length: 7 }, (_, i) => parseYmd(addDays(weekStart, i)).toLocaleDateString(LOC, { weekday: 'narrow' }).toUpperCase());
     $('#weekDays').innerHTML = Array.from({ length: 7 }, (_, i) => {
       const d = addDays(weekStart, i);
       const cls = 'wd' + (d === day ? ' sel' : '') + (d === t ? ' today' : '') + (L.has(d) ? ' has' : '');
@@ -699,7 +727,7 @@
   function matchList(list, q) {
     const words = norm(q).split(/\s+/).filter(Boolean);
     return list.map(p => {
-      const s = p.s || norm(p.name + ' ' + (p.brand || ''));
+      const s = (p.s || norm(p.name + ' ' + (p.brand || ''))) + (I18N.lang !== 'fr' ? ' ' + norm(I18N.t(p.name)) : '');
       if (!words.every(w => s.includes(w))) return null;
       const n = norm(p.name);
       return { p, score: (n.startsWith(words[0]) ? 0 : 1) + n.length / 100 };
@@ -1461,6 +1489,7 @@
     const diff = cw && sw ? cw - sw : 0;
     el.innerHTML =
       '<header class="pg-head"><h1 class="page-title">Progrès</h1><div class="seg"><button data-act="range" data-r="7"' + (range === 7 ? ' class="on"' : '') + '>7 jours</button><button data-act="range" data-r="30"' + (range === 30 ? ' class="on"' : '') + '>30 jours</button></div></header>' +
+      (window.NS_MOTIV ? window.NS_MOTIV.progressHTML() : '') +
       '<section class="card"><div class="card-title"><h2>Calories</h2></div>' +
       '<div class="kpis"><div class="kpi"><b class="num">' + (logged.length ? fk(avg) : '—') + '</b><span>moyenne / jour</span></div>' +
       '<div class="kpi"><b class="num">' + inGoal + ' / ' + logged.length + '</b><span>jours dans l’objectif</span></div>' +
@@ -1497,7 +1526,7 @@
       if (v > 0) s += '<rect x="' + x.toFixed(1) + '" y="' + (y(0) - hh).toFixed(1) + '" width="' + bw.toFixed(1) + '" height="' + hh.toFixed(1) + '" rx="' + Math.min(6, bw / 2).toFixed(1) + '" fill="' + (over ? 'var(--burn)' : 'var(--brand)') + '"/>';
       const every = n <= 7 ? 1 : 5;
       if ((n - 1 - i) % every === 0) {
-        const lab = n <= 7 ? cap(parseYmd(d).toLocaleDateString('fr-FR', { weekday: 'short' }).replace('.', '')).slice(0, 3) : parseYmd(d).getDate() + '/' + (parseYmd(d).getMonth() + 1);
+        const lab = n <= 7 ? (I18N.lang === 'ar' ? parseYmd(d).toLocaleDateString(LOC, { weekday: 'narrow' }) : cap(parseYmd(d).toLocaleDateString(LOC, { weekday: 'short' }).replace('.', '')).slice(0, 3)) : parseYmd(d).getDate() + '/' + (parseYmd(d).getMonth() + 1);
         s += '<text x="' + (x + bw / 2).toFixed(1) + '" y="' + (H - 6) + '" text-anchor="middle">' + lab + '</text>';
       }
     });
@@ -1580,7 +1609,9 @@
         (P.goal !== 'maintain' && P.goalWeight ? '<div class="kv"><span>Poids visé</span><b>' + fkg(P.goalWeight) + ' kg</b></div>' : '') +
         '<div class="kv"><span>Activité</span><b>' + esc(lvl ? lvl.label : '') + '</b></div></section>' : '') +
       accountHTML() +
+      (window.NS_RAPPELS ? window.NS_RAPPELS.cardHTML() : '') +
       halalSettingsHTML() +
+      '<section class="card"><div class="card-title"><h2>Langue</h2></div>' + LANG_SEG() + '</section>' +
       '<section class="card"><div class="card-title"><h2>Apparence</h2></div><div class="seg">' +
       [['auto', 'Auto'], ['light', 'Clair'], ['dark', 'Sombre'], ['black', 'Noir']].map(t => '<button data-act="theme" data-t="' + t[0] + '"' + (S.theme === t[0] ? ' class="on"' : '') + '>' + t[1] + '</button>').join('') + '</div>' +
       '<div class="swatches" role="radiogroup" aria-label="Couleur de l’appli">' + ACCENTS.map(a => '<button class="swatch' + (S.accent === a[0] ? ' on' : '') + '" data-act="accent" data-a="' + a[0] + '" role="radio" aria-checked="' + (S.accent === a[0]) + '" style="color:' + a[2] + '"><i style="background:' + a[2] + '"><svg viewBox="0 0 24 24" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></i>' + a[1] + '</button>').join('') + '</div>' +
@@ -1602,8 +1633,8 @@
     if (SYNC.pending) return 'Modifications en attente de sauvegarde…';
     if (SYNC.lastPush) {
       const d = new Date(SYNC.lastPush), t = today();
-      const day0 = ymd(d) === t ? 'aujourd’hui' : ymd(d) === addDays(t, -1) ? 'hier' : 'le ' + d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' });
-      return 'Sauvegardé ' + day0 + ' à ' + d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+      const day0 = ymd(d) === t ? 'aujourd’hui' : ymd(d) === addDays(t, -1) ? 'hier' : 'le ' + d.toLocaleDateString(LOC, { day: 'numeric', month: 'short' });
+      return 'Sauvegardé ' + day0 + ' à ' + d.toLocaleTimeString(LOC, { hour: '2-digit', minute: '2-digit' });
     }
     return 'Pas encore sauvegardé';
   }
@@ -1680,7 +1711,7 @@
       if (!unread.length || layers.length || OB) return;
       const el = mountSheet(head(unread.length > 1 ? unread.length + ' nouveaux messages' : 'Nouveau message') +
         unread.map(m => '<div class="msg"><b>' + esc(m.title) + '</b><p style="margin-top:6px;white-space:pre-wrap">' + esc(m.body) + '</p><p class="hint" style="margin-top:8px">' +
-          esc(new Date(m.created_at).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' })) + '</p></div>').join('') +
+          esc(new Date(m.created_at).toLocaleDateString(LOC, { day: 'numeric', month: 'long' })) + '</p></div>').join('') +
         '<button class="btn primary" data-act="close">OK</button>');
       openLayer({ el, onClose: () => {
         C.req('/rest/v1/message_reads', { method: 'POST', auth: true, headers: { Prefer: 'resolution=ignore-duplicates,return=minimal' }, body: unread.map(m => ({ message_id: m.id, user_id: me })) }).catch(() => {});
@@ -1838,6 +1869,10 @@
     o.profile = latest.profile || a.profile || b.profile;
     o.goals = latest.profile || !(a.profile || b.profile) ? latest.goals : (a.profile ? a.goals : b.goals);
     o.warn = latest.warn; o.theme = latest.theme; o.accent = latest.accent;
+    const ma = a.motiv, mb = b.motiv, bd = Object.assign({}, mb.badges);
+    Object.keys(ma.badges).forEach(k => { bd[k] = bd[k] ? Math.min(bd[k], ma.badges[k]) : ma.badges[k]; });
+    o.remind = (a.remind.t || 0) >= (b.remind.t || 0) ? a.remind : b.remind;
+    o.motiv = { badges: bd, done: Object.assign({}, mb.done, ma.done), seen: ma.seen > mb.seen ? ma.seen : mb.seen, lvl: Math.max(ma.lvl, mb.lvl), init: ma.init || mb.init, t: Math.max(ma.t, mb.t) };
     o.metaT = Math.max(a.metaT || 0, b.metaT || 0);
     o.skipSetup = !!(a.skipSetup || b.skipSetup);
     return fixState(o);
@@ -1854,7 +1889,7 @@
   function offerRemote(r, fromLogin) {
     const d = new Date(r.updated_at);
     const n = (r.data && Array.isArray(r.data.entries)) ? r.data.entries.length : 0;
-    const when = d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }) + ' à ' + d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+    const when = d.toLocaleDateString(LOC, { day: 'numeric', month: 'short' }) + ' à ' + d.toLocaleTimeString(LOC, { hour: '2-digit', minute: '2-digit' });
     const title = r.device === 'admin' ? 'Ton compte a été mis à jour par l’administrateur' : fromLogin ? 'Une sauvegarde existe déjà' : 'Sauvegarde plus récente trouvée';
     actionSheet(title, [
       { label: 'Récupérer la sauvegarde en ligne', sub: 'Du ' + when + ' · ' + n + ' aliment' + (n > 1 ? 's' : '') + ' · remplace ce téléphone', icon: 'i-download', color: 'var(--brand)', run: () => { applyRemote(r.data, false, r.updated_at); toast('Sauvegarde récupérée'); } },
@@ -1923,7 +1958,8 @@
       title = 'Bienvenue sur NutriScan';
       lead = 'Scanne tes produits, suis tes calories et tes protéines, entraîne-toi et trouve quoi cuisiner. Crée ton compte gratuit pour commencer.';
       body = off + googleBtn + '<button class="btn primary block" data-g="signup">' + ic('i-user', 'sm') + 'Créer un compte avec mon e-mail</button>' +
-        '<button class="btn outline block" data-g="login">J’ai déjà un compte</button>' + (google ? consentBox + err : '');
+        '<button class="btn outline block" data-g="login">J’ai déjà un compte</button>' + (google ? consentBox + err : '') +
+        '<div class="gate-lang">' + ic('i-globe', 'sm') + LANG_SEG() + '</div>';
     }
     box.innerHTML = '<div class="ob gate"><div class="ob-top">' + (g.mode !== 'start' ? '<button class="iconbtn ghost" data-g="start" aria-label="Retour">' + ic('i-left') + '</button>' : '<span></span>') + '<span></span><span></span></div>' +
       (g.mode === 'start' ? '<div class="logo-big">' + ic('i-scan') + '</div>' : '') +
@@ -1970,6 +2006,7 @@
     const a = b.dataset.g;
     if (a === 'privacy') { openPrivacy(); return; }
     if (a === 'terms') { openTerms(); return; }
+    if (a === 'lang') return;
     if (a === 'google') {
       if (!navigator.onLine) { gateErr('Pas de connexion Internet.'); return; }
       if (!GATE.consent) { gateErr('Accepte les conditions d’utilisation pour continuer.'); return; }
@@ -2144,7 +2181,7 @@
       title = (d.name ? d.name + ', voici' : 'Voici') + ' ton plan';
       lead = 'Tu dépenses environ ' + fk(r.tdee) + ' kcal par jour.' + (r.floored ? ' On ne descend pas sous ' + fk(d.sex === 'f' ? 1200 : 1500) + ' kcal pour rester en bonne santé.' : '');
       let eta = '';
-      if (r.weeks > 0) { const dt = new Date(); dt.setDate(dt.getDate() + Math.round(r.weeks * 7)); eta = 'Objectif de ' + fkg(num(d.goalWeight)) + ' kg vers ' + dt.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' }) + ' (estimation)'; }
+      if (r.weeks > 0) { const dt = new Date(); dt.setDate(dt.getDate() + Math.round(r.weeks * 7)); eta = 'Objectif de ' + fkg(num(d.goalWeight)) + ' kg vers ' + dt.toLocaleDateString(LOC, { month: 'long', year: 'numeric' }) + ' (estimation)'; }
       body = '<div class="result"><span>Objectif quotidien</span><div class="big num">' + fk(r.kcal) + '</div><span>kcal par jour</span></div>' +
         '<div class="tiles">' + MACROS.map(m => '<div class="tile"><b class="num" style="color:' + m.color + '">' + r[m.k] + ' g</b><span>' + m.short + '</span></div>').join('') +
         '<div class="tile"><b class="num" style="color:var(--water)">' + fL(r.water) + ' L</b><span>Eau</span></div></div>' +
@@ -2225,7 +2262,7 @@
   /* Sections Repas et Sport : modules séparés (meals.js, sport.js) qui utilisent ces outils */
   const SCREENS = {};
   window.NS_APP = {
-    get S() { return S; }, save, touchMeta, now, uid, today, addDays, parseYmd, ymd, esc, num, fk, f1, r0, clamp, ic, $, $$,
+    get S() { return S; }, save, touchMeta, now, uid, today, addDays, parseYmd, ymd, esc, num, fk, f1, r0, clamp, ic, $, $$, cap, locale: () => LOC, lang: () => I18N.lang, t: I18N.t,
     mountSheet, openLayer, closeTop, head, actionSheet, toast, arm, track, renderAll, switchTab, openProduct, getP, totals, burnedOf, latestWeight,
     MEALS, MEAL, defaultMeal, get day() { return day; }, get tab() { return tab; }, screens: SCREENS,
     register(name, mod) { SCREENS[name] = mod; if (tab === name) renderAll(); }
@@ -2263,6 +2300,7 @@
     editGoals: () => openGoals(),
     editProfile: () => openOnboarding(!!S.profile),
     theme: b => { S.theme = b.dataset.t; touchMeta(); save(); applyTheme(); renderAll(); },
+    lang: b => { if (b.dataset.l !== I18N.lang && I18N.set) { track('lang', { l: b.dataset.l }); flushTrack(); I18N.set(b.dataset.l); } },
     accent: b => { S.accent = b.dataset.a; touchMeta(); save(); applyTheme(); renderAll(); track('accent', { a: S.accent }); },
     halalSet: b => {
       const k = b.dataset.k, v = b.dataset.v;
@@ -2290,10 +2328,11 @@
         const ok = await sync({ push: true });
         if (!ok) { toast('Connecte-toi à Internet pour sauvegarder tes données avant de te déconnecter'); return; }
       }
+      if (window.NS_RAPPELS) { try { await window.NS_RAPPELS.offDevice(true); } catch (e) { /* rien */ } }
       await C.signOut(); resetLocal(); openGate('start'); toast('Déconnecté');
     },
     deleteAccount: async () => {
-      try { await C.deleteAccount(); resetLocal(); openGate('start'); toast('Compte et sauvegarde en ligne supprimés'); }
+      try { if (window.NS_RAPPELS) { try { await window.NS_RAPPELS.offDevice(true); } catch (e) { /* rien */ } } await C.deleteAccount(); resetLocal(); openGate('start'); toast('Compte et sauvegarde en ligne supprimés'); }
       catch (e) { toast(e.message); }
     },
     wipe: () => {
@@ -2377,6 +2416,18 @@
   let resizeT;
   window.addEventListener('resize', () => { clearTimeout(resizeT); resizeT = setTimeout(() => { if (tab === 'progress') renderProgress(); }, 200); });
 
+  /* Raccourcis (icône, notifications) : ?go=scan | meals | sport | journal | report | weight | water | add&meal=… */
+  function goTo(go, meal) {
+    if (GATE || OB) return;
+    if (go === 'scan') { closeAll(); setTimeout(() => openScanner(), 200); }
+    else if (go === 'report') { switchTab('progress'); if (window.NS_MOTIV) window.NS_MOTIV.openReport(); }
+    else if (go === 'weight') { switchTab('journal'); openWeight(false); }
+    else if (go === 'add') { setDay(today()); switchTab('journal'); openAddFood(MEAL[meal] ? meal : defaultMeal()); }
+    else if (go === 'water') { setDay(today()); switchTab('journal'); setTimeout(() => { const w = $('#waterCard'); if (w) w.scrollIntoView({ block: 'center', behavior: 'smooth' }); }, 150); }
+    else switchTab(go);
+  }
+  if ('serviceWorker' in navigator) navigator.serviceWorker.addEventListener('message', e => { const d = e.data || {}; if (d.type === 'go') { closeAll(); setTimeout(() => goTo(d.go, d.meal), 250); } });
+
   /* ================= Démarrage ================= */
   try { if (history.state && history.state.nsLayer) history.replaceState(null, ''); } catch (e) { /* rien */ }
   applyTheme();
@@ -2387,8 +2438,8 @@
   else setTimeout(askConsent, 1500);
   // Raccourcis de l'icône (appui long) : ?go=scan | meals | sport
   try {
-    const go = new URLSearchParams(location.search).get('go');
-    if (go) { history.replaceState(history.state, '', location.pathname + location.hash); if (!GATE && !OB) { if (go === 'scan') setTimeout(() => openScanner(), 300); else switchTab(go); } }
+    const q = new URLSearchParams(location.search), go = q.get('go');
+    if (go) { history.replaceState(history.state, '', location.pathname + location.hash); if (!GATE && !OB) setTimeout(() => goTo(go, q.get('meal')), 300); }
   } catch (e) { /* rien */ }
   track('app_open', openInfo());
   cloudStart();

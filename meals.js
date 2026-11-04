@@ -141,7 +141,7 @@
     else if (filt === 'quick') list = list.filter(r => r.time <= 20);
     else if (filt === 'prot') list = list.filter(r => r.p >= 30 || (r.type !== 'main' && r.p >= 15));
     else if (filt === 'fav') list = list.filter(r => (c.favs || []).includes(r.id));
-    if (q) { const nq = q.toLowerCase(); list = list.filter(r => (r.n + ' ' + r.ing.map(([k]) => ingName(k)).join(' ')).toLowerCase().includes(nq)); }
+    if (q) { const nq = q.toLowerCase(); const T = A.t || (x => x); list = list.filter(r => (r.n + ' ' + T(r.n) + ' ' + r.ing.map(([k]) => ingName(k) + ' ' + T(ingName(k))).join(' ')).toLowerCase().includes(nq)); }
     list.sort((a, b) => (liked(b, p) - liked(a, p)) || a.n.localeCompare(b.n, 'fr'));
     el.innerHTML = '<header class="page-head"><h1 class="page-title">Repas</h1><button class="iconbtn" data-ml="quiz" aria-label="Mes goûts">' + ic('i-edit') + '</button></header>' +
       (!p ? '<section class="card ml-hero"><h2>Qu’est-ce qu’on mange ?</h2><p class="hint">Dis-nous ce que tu aimes : on te propose des plats qui rentrent dans tes calories, un menu pour la semaine et la liste de courses. Jamais de porc, d’alcool ni de sang.</p><button class="btn primary" data-ml="quiz">Dire ce que j’aime</button></section>' : '') +
@@ -241,7 +241,7 @@
     A.openLayer({ el });
     const draw = () => {
       const w = ck().week, days = weekDays();
-      $('#wkb', el).innerHTML = days.length ? days.map(d => '<div class="wk-day"><h3>' + esc(d === today() ? 'Aujourd’hui' : parseYmd(d).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'short' })) + '</h3>' +
+      $('#wkb', el).innerHTML = days.length ? days.map(d => '<div class="wk-day"><h3>' + esc(d === today() ? 'Aujourd’hui' : parseYmd(d).toLocaleDateString(A.locale(), { weekday: 'long', day: 'numeric', month: 'short' })) + '</h3>' +
         Object.keys(w.days[d]).sort((a, b) => Object.keys(SLOT).indexOf(a) - Object.keys(SLOT).indexOf(b)).map(sl => { const x = w.days[d][sl], r = RM[x.id]; return r ? '<div class="wk-slot"><span class="flabel">' + esc(SLOT[sl][1]) + '</span><div class="wk-row">' + card(r, x.m) + '<button class="iconbtn" data-wk="swap" data-d="' + d + '" data-s="' + sl + '" aria-label="Changer">' + ic('i-swap') + '</button></div></div>' : ''; }).join('') + '</div>').join('')
         : '<p class="hint">Ton menu est terminé : crée-en un nouveau.</p>';
     };
