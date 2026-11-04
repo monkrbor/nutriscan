@@ -3,11 +3,11 @@
 // - Modules de scan et polices : gardés en cache pour scanner sans réseau.
 // - Fiches et photos de produits déjà consultées : copie gardée pour les revoir hors ligne.
 // - Photos des recettes (Pexels) : copie gardée quand le site l'autorise, sinon affichées en direct.
-const CACHE = 'nutriscan-v15';
+const CACHE = 'nutriscan-v16';
 const RUNTIME = 'nutriscan-rt-v1';
 const PHOTOS = 'nutriscan-photos-v1';
-const FILES = ['./', './index.html', './styles.css', './app.js', './foods.js', './additives.js', './ingredients.js', './config.js', './cloud.js', './exercises.js', './figure.js', './recipes.js', './sport.js', './meals.js',
-  './manifest.webmanifest', './icon.svg', './icon-180.png', './icon-192.png', './icon-512.png'];
+const FILES = ['./', './index.html', './i18n.js', './i18n-en.js', './i18n-ar.js', './styles.css', './app.js', './foods.js', './additives.js', './ingredients.js', './config.js', './cloud.js', './exercises.js', './figure.js', './recipes.js', './sport.js', './meals.js', './motiv.js', './rappels.js',
+  './manifest.webmanifest', './icon.svg', './icon-180.png', './icon-192.png', './icon-512.png', './badge-96.png'];
 const LIBS = ['https://cdn.jsdelivr.net/npm/barcode-detector@3.0.7/dist/iife/ponyfill.min.js', 'https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js'];
 
 self.addEventListener('install', e => {
@@ -88,4 +88,27 @@ self.addEventListener('fetch', e => {
       .then(res => { if (res.ok) { const copy = res.clone(); caches.open(CACHE).then(c => c.put(req, copy)); } return res; })
       .catch(async () => (await caches.match(req, { ignoreSearch: true })) || (req.mode === 'navigate' ? caches.match('./index.html') : Response.error()))
   );
+});
+
+// Rappels : notifications envoyées par le serveur (fonction « rappels »)
+self.addEventListener('push', e => {
+  let d = {};
+  try { d = e.data ? e.data.json() : {}; } catch (err) { d = { body: e.data ? e.data.text() : '' }; }
+  const opts = { body: d.body || '', icon: 'icon-192.png', badge: 'badge-96.png', tag: d.tag || 'nutriscan', data: { url: d.url || './' }, lang: d.lang || 'fr', dir: d.lang === 'ar' ? 'rtl' : 'auto' };
+  e.waitUntil(self.registration.showNotification(d.title || 'NutriScan', opts));
+});
+self.addEventListener('notificationclick', e => {
+  e.notification.close();
+  const url = new URL((e.notification.data && e.notification.data.url) || './', self.registration.scope);
+  const q = url.searchParams;
+  e.waitUntil((async () => {
+    const list = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    const c = list.find(w => w.url.indexOf(self.registration.scope) === 0);
+    if (c) {
+      try { await c.focus(); } catch (err) { /* rien */ }
+      if (q.get('go')) c.postMessage({ type: 'go', go: q.get('go'), meal: q.get('meal') });
+      return;
+    }
+    await self.clients.openWindow(url.href);
+  })());
 });

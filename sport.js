@@ -178,7 +178,7 @@
         : '<p class="hint" style="margin-top:8px">Ta première séance apparaîtra ici.</p>') + '</section>' +
       '<section class="card"><div class="card-title"><h2>Tous les exercices</h2></div>' + groupsHTML() + '</section>';
   }
-  function dayLabel(d) { const t = today(); if (d === t) return 'Aujourd’hui'; if (d === addDays(t, -1)) return 'Hier'; return parseYmd(d).toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short' }); }
+  function dayLabel(d) { const t = today(); if (d === t) return 'Aujourd’hui'; if (d === addDays(t, -1)) return 'Hier'; return parseYmd(d).toLocaleDateString(A.locale(), { weekday: 'short', day: 'numeric', month: 'short' }); }
   function groupsHTML() { return '<div class="sp-groups">' + GROUPS.map(g => '<button data-sp="group" data-g="' + g[0] + '">' + esc(g[1]) + '<small>' + EX.filter(e => g[2].includes(e.pat)).length + '</small></button>').join('') + '</div>'; }
 
   /* ================= Questionnaire ================= */
